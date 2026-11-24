@@ -61,4 +61,13 @@ workspace.windowRemoved.connect(removed);
 // Existing windows already have their final app id: match both PID and app id
 // before touching them. Provisional PID-only hiding is only for new windows.
 workspace.windowList().forEach(activate);
-if (!finished && !closing && !waitForWindow) finish('missing', null);
+// Only the initial lookup toggles: a newly launched window must be activated.
+toggleExisting = false;
+if (!finished && !closing && Date.now() <= expiresAt) {
+    if (waitForWindow) {
+        // Stay subscribed while the helper launches a window. Existing windows
+        // close in this same script, so warm toggles need only one load/run.
+        callDBus(callbackService, '/Activation', 'org.kde.routerpersonal.Activation',
+            'finished', 'ready', '');
+    } else finish('missing', null);
+}

@@ -1,9 +1,10 @@
 """Focused launcher/profile and installer checks, without touching the desktop."""
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +38,70 @@ class LauncherTests(unittest.TestCase):
             (profile / 'SingletonLock').unlink()
             self.assertIsNone(launcher.browser_pid(profile))
 
+    def test_windowless_pid_and_extra_flags_still_require_exact_profile(self):
+        with tempfile.TemporaryDirectory(prefix='router tray ') as temp:
+            profile = Path(temp) / 'browser'
+            profile.mkdir()
+            (profile / 'SingletonLock').symlink_to('host-1234')
+            common = launcher.browser_arguments(profile)[:-1]
+            flattened = '/opt/google/chrome/chrome ' + ' '.join(common + [
+                '--remote-debugging-pipe', '--no-startup-window']) + '\0'
+            with patch.object(Path, 'read_bytes', return_value=flattened.encode()):
+                self.assertEqual(launcher.browser_pid(profile), 1234)
+            with patch.object(Path, 'read_bytes', return_value=flattened.replace(str(profile), str(profile) + '-other').encode()):
+                self.assertIsNone(launcher.browser_pid(profile))
+
+    def test_warm_toggle_closes_without_launching_or_loading_a_second_script(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            with patch.object(launcher, 'browser_context', return_value=('/chrome', directory, directory / 'browser')), patch.object(
+                launcher, 'browser_pid', side_effect=[1234, None]), patch.object(
+                launcher, 'control_window', return_value='closed') as control, patch.object(
+                launcher.subprocess, 'Popen') as launch:
+                launcher.open_dashboard()
+                self.assertEqual(control.call_count, 1)
+                self.assertTrue(control.call_args.args[2])
+                launch.assert_not_called()
+
+    def test_warm_launch_disables_translation_in_its_dedicated_profile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            def activate(pid, profile, wait, launch):
+                launch()
+                return 'activated'
+            with patch.object(launcher, 'browser_context', return_value=('/chrome', directory, directory / 'browser')), patch.object(
+                launcher, 'browser_pid', return_value=1234), patch.object(
+                launcher, 'control_window', side_effect=activate), patch.object(
+                launcher.subprocess, 'Popen') as launch:
+                launcher.open_dashboard()
+                args = launch.call_args.args[0]
+                self.assertIn('--disable-features=Translate', args)
+                self.assertIn('--user-data-dir=' + str(directory / 'browser'), args)
+                self.assertNotIn('--remote-debugging-port=0', args)
+                self.assertEqual(launch.call_count, 1)
+
+    def test_warm_preferences_preserve_unrelated_state_and_use_private_pipes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            profile = directory / 'browser'
+            profile.mkdir()
+            state = profile / 'Local State'
+            state.write_text(json.dumps({'existing': {'value': 42}, 'background_mode': {'other': True}}))
+            child = MagicMock(pid=1234)
+            child.wait.return_value = 0
+            with patch.object(launcher, 'browser_context', return_value=('/chrome', directory, profile)), patch.object(
+                launcher, 'browser_pid', side_effect=[None, None, 1234]), patch.object(
+                launcher.subprocess, 'Popen', return_value=child) as launch:
+                launcher.warm_browser()
+            self.assertEqual(json.loads(state.read_text()), {'existing': {'value': 42},
+                'background_mode': {'other': True, 'enabled': False}})
+            self.assertEqual(state.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(launch.call_args.kwargs['stdin'], launcher.subprocess.PIPE)
+            self.assertEqual(launch.call_args.kwargs['stdout'], launcher.subprocess.PIPE)
+            self.assertIn('--pipe-browser', launch.call_args.args[0])
+            child.stdin.close.assert_called_once()
+            child.stdout.close.assert_called_once()
+
     def test_missing_browser_requests_fallback_without_launching(self):
         with patch.object(launcher.shutil, 'which', return_value=None), patch.object(launcher.subprocess, 'Popen') as launch:
             with self.assertRaisesRegex(RuntimeError, 'Chrome o Chromium'):
@@ -54,6 +119,32 @@ class LauncherTests(unittest.TestCase):
             installer.remove_browser_profile(home)
             self.assertFalse(profile.exists())
             self.assertEqual(unrelated.read_text(), 'preserve')
+
+
+class WarmServiceTests(unittest.TestCase):
+    def test_install_and_remove_only_the_owned_service(self):
+        with tempfile.TemporaryDirectory(prefix='router tray % $ ') as temp:
+            config = Path(temp) / 'config'
+            package = Path(temp) / 'package'
+            unrelated = config / 'systemd/user/unrelated.service'
+            unrelated.parent.mkdir(parents=True)
+            unrelated.write_text('preserve')
+            unit = config / 'systemd/user' / installer.WARM_SERVICE
+            with patch.object(installer, 'run') as run:
+                installer.set_warm_service(config, Path(temp), package, False)
+                text = unit.read_text()
+                self.assertIn(' --warm-browser\n', text)
+                self.assertIn(str(package).replace('%', '%%').replace('$', '$$'), text)
+                self.assertIn('Environment="XDG_DATA_HOME=' + str(Path(temp)).replace('%', '%%') + '"', text)
+                self.assertIn('PartOf=graphical-session.target', text)
+                self.assertIn('KillMode=control-group', text)
+                run.assert_called_with('systemctl', '--user', 'enable', '--now', installer.WARM_SERVICE)
+                installer.set_warm_service(config, Path(temp), package, True)
+                self.assertFalse(unit.exists())
+                self.assertEqual(unrelated.read_text(), 'preserve')
+                self.assertIn(('systemctl', '--user', 'disable', '--now', installer.WARM_SERVICE),
+                              [c.args for c in run.call_args_list])
+
 
 
 class WindowRuleTests(unittest.TestCase):

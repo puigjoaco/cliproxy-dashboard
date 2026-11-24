@@ -94,6 +94,7 @@ test('malformed API data is rejected', () => {
 });
 function activator(windows, options = {}) {
     const callbacks = [];
+    const ready = [];
     const listeners = new Set();
     const removed = new Set();
     const workspace = {activeWindow: null, windowList: () => windows, windowAdded: {
@@ -103,10 +104,10 @@ function activator(windows, options = {}) {
     }};
     const context = {workspace, expectedPid: 1234, expiresAt: Date.now() + 8000,
         callbackService: 'test', waitForWindow: true, toggleExisting: false,
-        callDBus: (...args) => callbacks.push(args), ...options};
+        callDBus: (...args) => (args.at(-2) === 'ready' ? ready : callbacks).push(args), ...options};
     vm.runInNewContext(fs.readFileSync(require.resolve(
         '../desktop/plasma-tray/package/contents/code/activate.js'), 'utf8'), context);
-    return {workspace, callbacks, add: window => [...listeners].forEach(fn => fn(window)),
+    return {workspace, callbacks, ready, add: window => [...listeners].forEach(fn => fn(window)),
         remove: window => [...removed].forEach(fn => fn(window)), listeners};
 }
 const dashboardWindow = (pid = 1234) => ({pid, resourceClass: 'chrome-127.0.0.1__-Default',
@@ -155,6 +156,7 @@ test('toggle really closes an existing window without activating it, including w
         const result = activator([window], {waitForWindow: false, toggleExisting: true});
         assert.equal(closes, 1);
         assert.equal(result.workspace.activeWindow, null);
+        assert.equal(result.ready.length, 0, 'closing an existing window must never request another launch');
         assert.equal(result.callbacks.length, 0, 'close is confirmed only after windowRemoved');
         result.remove(window);
         assert.equal(result.callbacks[0].at(-2), 'closed');
@@ -179,5 +181,18 @@ test('a delayed Chrome app id is hidden immediately and activated when its class
     assert.equal(result.workspace.activeWindow, window);
     assert.equal(result.callbacks[0].at(-2), 'activated');
     assert.equal(callbacks.size, 0);
+});
+test('a warm toggle requests one launch only when absent and activates the newly added window', () => {
+    const result = activator([], {toggleExisting: true});
+    assert.equal(result.ready.length, 1);
+    assert.equal(result.callbacks.length, 0);
+    const window = dashboardWindow();
+    window.closeWindow = () => { throw new Error('new windows must not close'); };
+    result.add(window);
+    assert.equal(result.workspace.activeWindow, window);
+    assert.equal(result.callbacks[0].at(-2), 'activated');
+    result.add(dashboardWindow());
+    assert.equal(result.ready.length, 1);
+    assert.equal(result.callbacks.length, 1);
 });
 console.log(`Plasma tray: ${count}/${count} passed`);

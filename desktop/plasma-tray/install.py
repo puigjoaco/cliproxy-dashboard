@@ -47,11 +47,40 @@ def set_window_rule(remove):
     run('qdbus6', 'org.kde.KWin', '/KWin', 'org.kde.KWin.reconfigure')
 
 
+WARM_SERVICE = 'router-personal-browser.service'
+
+
+def set_warm_service(config_home, data_home, package, remove):
+    """Manage only this applet's user service; Chrome never gets a debug port."""
+    unit = config_home / 'systemd/user' / WARM_SERVICE
+    if remove:
+        if unit.exists():
+            run('systemctl', '--user', 'disable', '--now', WARM_SERVICE)
+            unit.unlink()
+            run('systemctl', '--user', 'daemon-reload')
+        return
+    helper = str(package / 'contents/code/open_dashboard.py')
+    # systemd performs percent expansion even inside quoted ExecStart arguments.
+    def quote(value):
+        return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('\n', '\\n') + '"'
+    quoted = quote(helper).replace('$', '$$')
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    unit.write_text('[Unit]\nDescription=Router personal windowless browser\n'
+                    'PartOf=graphical-session.target\nAfter=graphical-session.target\n'
+                    'StartLimitIntervalSec=60\nStartLimitBurst=3\n\n'
+                    '[Service]\nType=exec\nEnvironment=' + quote('XDG_DATA_HOME=' + str(data_home)) + '\n'
+                    'ExecStart=/usr/bin/python3 ' + quoted + ' --warm-browser\n'
+                    'Restart=on-failure\nRestartSec=10\nKillMode=control-group\nTimeoutStopSec=10\n\n'
+                    '[Install]\nWantedBy=graphical-session.target\n')
+    run('systemctl', '--user', 'daemon-reload')
+    run('systemctl', '--user', 'enable', '--now', WARM_SERVICE)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--uninstall', action='store_true')
     args = parser.parse_args()
-    for tool in ('kpackagetool6', 'qdbus6', 'kreadconfig6', 'kwriteconfig6'):
+    for tool in ('kpackagetool6', 'qdbus6', 'kreadconfig6', 'kwriteconfig6', 'systemctl'):
         if not shutil.which(tool):
             parser.error(f'Falta {tool}; ejecuta este script en una sesión de Plasma 6.')
     config_home = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
@@ -108,6 +137,7 @@ if (!count) throw new Error("No se encontró una bandeja del sistema; añade una
     if 'Error' in result or 'Bandejas actualizadas: 0' in result:
         raise RuntimeError('Plasma no pudo actualizar la bandeja; no se reinició la sesión.')
     set_window_rule(args.uninstall)
+    set_warm_service(config_home, data_home, package, args.uninstall)
     if args.uninstall:
         print(run('kpackagetool6', '--type', 'Plasma/Applet', '--remove', PLUGIN))
         remove_browser_profile(data_home)

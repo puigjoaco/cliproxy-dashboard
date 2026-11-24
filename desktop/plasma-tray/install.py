@@ -201,9 +201,9 @@ def install(config_home, data_home, url):
     print(say('Router personal instalado y visible en la bandeja.', 'Router personal installed and shown in the tray.'))
 
 
-def uninstall(config_home, data_home):
+def uninstall(config_home, data_home, problems=None):
     """Remove what can be removed; a missing tray, session or tool never stops the other steps."""
-    problems = []
+    problems = list(problems or [])
 
     def step(name, tools, action):
         missing = [tool for tool in tools if not shutil.which(tool)]
@@ -256,9 +256,15 @@ def main():
     config_home = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
     state_home = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state'))
     data_home = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
-    backup_config(config_home, state_home)
+    problems = []
+    try:
+        backup_config(config_home, state_home)
+    except OSError as error:
+        if not args.uninstall:
+            raise
+        problems.append(say('copia de configuración: ', 'configuration backup: ') + failure(error))
     if args.uninstall:
-        uninstall(config_home, data_home)
+        uninstall(config_home, data_home, problems)
     else:
         install(config_home, data_home, url)
 

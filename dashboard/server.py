@@ -2016,7 +2016,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed(self, api_request=False):
         host = self.headers.get('Host', '')
-        if not valid_host(host, self.server.server_port):
+        if not valid_host(host, getattr(self.server, 'server_port', None)):
             self.send(421, b'{"error":"Unrecognized host"}')
             return False
         if api_request:

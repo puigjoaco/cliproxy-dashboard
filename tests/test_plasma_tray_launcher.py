@@ -280,6 +280,18 @@ class InstallerFlowTests(unittest.TestCase):
         self.assertFalse(self.unit.exists())
         self.assertFalse(self.profile.exists())
 
+    def test_a_failed_backup_is_reported_and_cleanup_continues(self):
+        env = {'XDG_CONFIG_HOME': str(self.config), 'XDG_DATA_HOME': str(self.data), 'LC_ALL': 'en_US.UTF-8'}
+        with FakeDesktop() as desktop, \
+             patch.object(installer.sys, 'argv', ['install.py', '--uninstall']), \
+             patch.dict(installer.os.environ, env), \
+             patch.object(installer, 'backup_config', side_effect=PermissionError('State directory is read-only')):
+            with self.assertRaisesRegex(RuntimeError, 'configuration backup: State directory is read-only'):
+                installer.main()
+        self.assertTrue(desktop.ran('kpackagetool6', '--type', 'Plasma/Applet', '--remove'))
+        self.assertFalse(self.unit.exists())
+        self.assertFalse(self.profile.exists())
+
     def test_a_failing_tray_script_does_not_stop_cleanup(self):
         with FakeDesktop(fail=('qdbus6',)) as desktop:
             with self.assertRaisesRegex(RuntimeError, 'qdbus6 failed'):

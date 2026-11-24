@@ -16,6 +16,13 @@ def run(*args):
     return subprocess.run(args, check=True, text=True, capture_output=True, timeout=30).stdout.strip()
 
 
+def remove_browser_profile(data_home):
+    profile = data_home / 'router-personal-tray/browser'
+    if profile.exists():
+        shutil.rmtree(profile)
+    (data_home / 'router-personal-tray/open.lock').unlink(missing_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--uninstall', action='store_true')
@@ -34,7 +41,8 @@ def main():
         backup = backup_dir / (config.name + '.' + stamp)
         shutil.copy2(config, backup)
         print(f'Copia de configuración: {backup}')
-    package = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'plasma/plasmoids' / PLUGIN
+    data_home = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
+    package = data_home / 'plasma/plasmoids' / PLUGIN
     if not args.uninstall:
         action = '--upgrade' if package.exists() else '--install'
         print(run('kpackagetool6', '--type', 'Plasma/Applet', action, str(HERE / 'package')))
@@ -77,6 +85,7 @@ if (!count) throw new Error("No se encontró una bandeja del sistema; añade una
         raise RuntimeError('Plasma no pudo actualizar la bandeja; no se reinició la sesión.')
     if args.uninstall:
         print(run('kpackagetool6', '--type', 'Plasma/Applet', '--remove', PLUGIN))
+        remove_browser_profile(data_home)
     print('Router personal desinstalado.' if args.uninstall else 'Router personal instalado y visible en la bandeja.')
 
 

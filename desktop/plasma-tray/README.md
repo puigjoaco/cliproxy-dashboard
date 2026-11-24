@@ -1,7 +1,7 @@
 # Router personal · Plasma 6
 
 A read-only tray widget for the local account router. Left click opens
-`http://127.0.0.1:8320` in the default browser; hover shows its health in Spanish.
+`http://127.0.0.1:8320` in its own **Personal Router** window; hover shows its health in Spanish.
 The context menu can open the dashboard or copy its address. Middle click does
 nothing. It polls `/api/health` every 30 seconds with a five-second timeout and
 never sends notifications or changes router settings.
@@ -20,11 +20,27 @@ restarted. Run the same command after updating the package; Plasma may keep the 
 keeps the previous behaviour, log out and back in when convenient; the installer
 never does this automatically. A new installation loads immediately.
 
-On Plasma Wayland, Chrome may receive the dashboard tab without coming to the
-front; its taskbar entry only asks for attention. A KWin window rule for
-`google-chrome` with **Focus stealing prevention: None** (forced) brings it to
-the front. Add it in System Settings → Window Rules; this applies to every link
-Chrome opens, not only the dashboard.
+The window uses Chrome/Chromium app mode and a dedicated profile under
+`$XDG_DATA_HOME/router-personal-tray/browser` (normally
+`~/.local/share/router-personal-tray/browser`). The tray icon toggles the window:
+if closed, it opens in front; if already open (even behind another window or
+minimized), it really closes. The context action **Abrir panel del router** uses
+the same toggle. Concurrent requests are serialized to avoid duplicate windows.
+
+The dashboard window is hidden from the taskbar and Alt+Tab. A short-lived KWin
+script sets `skipTaskbar` and `skipSwitcher` on creation, clears attention, and
+activates it. The script matches both the app id and the verified browser PID
+for this profile; it never selects normal Chrome windows or installs window
+rules. It stops responding after eight seconds even if its helper crashes, and
+is unloaded after each use. Browser startup waits until the script is listening,
+so the window is hidden before activation. No application launcher is installed:
+the tray icon is the entry point.
+
+Activation needs `/usr/bin/python3` with PyQt6 QtDBus (`python3-pyqt6` on Kubuntu).
+If the browser is missing or window control fails, the applet opens the URL in
+the default browser instead. Normal Chrome's profile and focus policy are
+unchanged. Uninstall removes the dedicated browser profile; close the dashboard
+window before uninstalling.
 
 To remove it:
 
@@ -43,6 +59,8 @@ The shared state mapping is `package/contents/code/status.js`; verify with:
 ```sh
 node tests/test_plasma_tray.cjs
 node --check desktop/plasma-tray/package/contents/code/status.js
+node --check desktop/plasma-tray/package/contents/code/activate.js
+python3 tests/test_plasma_tray_launcher.py
 ```
 
 The widget ignores the API's overall `ok` and local-app `codex` health fields.

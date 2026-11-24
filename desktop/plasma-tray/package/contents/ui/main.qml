@@ -4,6 +4,7 @@ import QtQuick
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
+import org.kde.plasma.plasma5support as Plasma5Support
 import "../code/status.js" as RouterStatus
 
 PlasmoidItem {
@@ -13,6 +14,7 @@ PlasmoidItem {
     property var observation: RouterStatus.initial(Date.now())
     property var view: RouterStatus.describe(observation, Date.now())
     property var request: null
+    property bool openingDashboard: false
     readonly property url iconUrl: Qt.resolvedUrl("../icons/router-" + view.kind + "-22.svg")
 
     // Always shown next to the clock; NeedsAttention would make Plasma pulse the icon.
@@ -30,7 +32,23 @@ PlasmoidItem {
     fullRepresentation: EmptyRepresentation {}
 
     function openDashboard() {
-        Qt.openUrlExternally(dashboardUrl);
+        if (openingDashboard) return;
+        openingDashboard = true;
+        var path = decodeURIComponent(Qt.resolvedUrl("../code/open_dashboard.py").toString().replace(/^file:\/\//, ""));
+        // Quote the installed path, including spaces or apostrophes in XDG_DATA_HOME.
+        var command = "/usr/bin/python3 '" + path.replace(/'/g, "'\\''") + "'";
+        launcher.connectSource(command);
+    }
+
+    Plasma5Support.DataSource {
+        id: launcher
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source);
+            root.openingDashboard = false;
+            if (data["exit status"] !== 0 || data["exit code"] !== 0) Qt.openUrlExternally(root.dashboardUrl);
+        }
     }
 
     function finish(data) {

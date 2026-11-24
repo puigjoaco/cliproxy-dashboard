@@ -114,7 +114,7 @@ function describe(state, now) {
     if (more) visible.push('y ' + more + (more === 1 ? ' aviso más' : ' avisos más'));
     return {kind: kind, attention: kind === 'down' || kind === 'warn', statusLine: line,
         details: visible, title: 'Router personal',
-        tooltip: [line].concat(visible, ['Clic para abrir el panel']).join('\n')};
+        tooltip: [line].concat(visible, ['Clic para abrir o cerrar el panel']).join('\n')};
 }
 
 if (typeof module !== 'undefined') module.exports = {initial: initial, validPayload: validPayload,

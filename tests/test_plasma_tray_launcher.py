@@ -56,5 +56,43 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(unrelated.read_text(), 'preserve')
 
 
+class WindowRuleTests(unittest.TestCase):
+    """KWin rule install/remove with every KDE command faked; never runs kreadconfig6 or kwriteconfig6."""
+
+    def apply(self, existing, remove):
+        calls = []
+
+        def fake_run(*args):
+            calls.append(args)
+            return existing if args[0] == 'kreadconfig6' else ''
+
+        with patch.object(installer, 'run', side_effect=fake_run):
+            installer.set_window_rule(remove)
+        general = {args[args.index('--key') + 1]: args[-1] for args in calls
+                   if args[0] == 'kwriteconfig6' and args[args.index('--group') + 1] == 'General'}
+        rule = [args for args in calls if args[0] == 'kwriteconfig6' and args[args.index('--group') + 1] == installer.RULE]
+        self.assertEqual(calls[-1], ('qdbus6', 'org.kde.KWin', '/KWin', 'org.kde.KWin.reconfigure'))
+        return general, rule
+
+    def test_install_appends_rule_and_keeps_unrelated_rules(self):
+        general, rule = self.apply('whatsapp-companion-tray-only', remove=False)
+        self.assertEqual(general, {'rules': 'whatsapp-companion-tray-only,' + installer.RULE, 'count': '2'})
+        self.assertEqual({args[-2]: args[-1] for args in rule}, installer.RULE_KEYS)
+
+    def test_reinstall_does_not_duplicate_the_rule(self):
+        general, _ = self.apply('whatsapp-companion-tray-only,' + installer.RULE, remove=False)
+        self.assertEqual(general, {'rules': 'whatsapp-companion-tray-only,' + installer.RULE, 'count': '2'})
+
+    def test_uninstall_deletes_only_the_dedicated_rule(self):
+        general, rule = self.apply(installer.RULE + ',whatsapp-companion-tray-only', remove=True)
+        self.assertEqual(general, {'rules': 'whatsapp-companion-tray-only', 'count': '1'})
+        self.assertEqual(sorted(args[-2] for args in rule), sorted(installer.RULE_KEYS))
+        self.assertTrue(all(args[-1] == '--delete' for args in rule))
+
+    def test_first_install_without_existing_rules(self):
+        general, _ = self.apply('', remove=False)
+        self.assertEqual(general, {'rules': installer.RULE, 'count': '1'})
+
+
 if __name__ == '__main__':
     unittest.main()

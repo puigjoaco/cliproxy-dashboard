@@ -132,6 +132,12 @@ Installation files and private state:
 
 What has been tested: this setup runs daily on the original Kubuntu machine. The current example was checked with CLIProxyAPI 8.0.79 and local KV disabled as an unprivileged scratch process: loopback-only listener, authenticated model listing, unauthenticated inference refusal and inaccessible management with an empty secret; startup left the config unchanged. In-place management activation hot-reloaded under the same PID; strict nested-v8 PATCH passed without config warnings and no KV database was created. Client-key replacement hot reload was previously checked on 8.0.47. The example unit passed `systemd-analyze verify`. The minimal Codex provider snippet above produced a real reply through the running gateway from a throwaway Codex home. A clean-machine installation has not been run end to end. The installer requires Linux with systemd; Windows and macOS hosts are not supported by it.
 
+## Plasma 6 system tray
+
+[Router personal](desktop/plasma-tray/README.md) keeps the router status and a
+one-click link to the dashboard next to the clock. Install it in the desktop
+user's Plasma session with `python3 desktop/plasma-tray/install.py` (no sudo).
+
 ## Update an existing installation
 
 From the checkout root, run `git pull`, review the plan from `sudo python3 scripts/install-operations.py`, then run `sudo python3 scripts/install-operations.py --apply` without a scope flag. Ensure the C compiler packages `gcc libc6-dev` are installed; Go is provisioned as in setup step 4. Preserve local dashboard edits before updating: checkout edits can conflict with the pull, and the install replaces dashboard files under `/opt/personal-codex-router` with checkout copies.

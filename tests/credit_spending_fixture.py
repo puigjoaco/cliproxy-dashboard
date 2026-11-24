@@ -81,8 +81,6 @@ def main():
     parser.add_argument('--state-dir',type=Path,required=True)
     args=parser.parse_args()
     state=build(args.state_dir)
-    original=app.valid_host
-    app.valid_host=lambda h:h==f'127.0.0.1:{args.port}' or original(h)
     class Handler(app.Handler):
         def do_POST(self):
             if self.path=='/fixture':

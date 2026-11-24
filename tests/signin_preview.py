@@ -48,8 +48,6 @@ def main():
     app.DB = args.state_dir / 'synthetic-usage.sqlite3'
     app.BILLING = args.state_dir / 'synthetic-billing.json'
     emails = list(app.routing_policy.identities('codex', inventory=CODEX_INVENTORY))
-    original_valid_host = app.valid_host
-    app.valid_host = lambda host: host == f'127.0.0.1:{args.port}' or original_valid_host(host)
     original_reconcile = app.routing_policy.reconcile
     claude_fixture = claude_routing(app, args.state_dir)
     app.routing_policy.reconcile = lambda *args, **kwargs: original_reconcile(*args, **kwargs) if kwargs.get('provider') == 'claude' else {'status': 'active'}

@@ -370,8 +370,6 @@ def main():
     parser.add_argument('--overview', action='store_true', help='two-gateway overview data')
     args = parser.parse_args()
     state = build_overview(args.state_dir) if args.overview else build_state(args.state_dir)
-    original_host = app.valid_host
-    app.valid_host = lambda value: value == f'127.0.0.1:{args.port}' or original_host(value)
     class Handler(app.Handler):
         def do_POST(self):
             if args.overview and overview_post(self, state):

@@ -1961,10 +1961,10 @@ def usage_summary(start, db=DB, fast_modes=None, gateway=None):
     return result
 
 
-def valid_host(host):
+def valid_host(host, server_port=None):
     try:
         parsed = urlsplit('http://' + host)
-        return parsed.hostname in ALLOWED_HOSTS and parsed.port in (None, 80, 8320, 18320) and not parsed.username and not parsed.password
+        return parsed.hostname in ALLOWED_HOSTS and parsed.port in (None, 80, 8320, 18320, server_port) and not parsed.username and not parsed.password
     except ValueError:
         return False
 
@@ -2014,7 +2014,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed(self, api_request=False):
         host = self.headers.get('Host', '')
-        if not valid_host(host):
+        if not valid_host(host, self.server.server_port):
             self.send(421, b'{"error":"Unrecognized host"}')
             return False
         if api_request:

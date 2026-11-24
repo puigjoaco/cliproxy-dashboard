@@ -1,11 +1,12 @@
-// Launcher supplies expectedPid, expiresAt, callbackService, waitForWindow, toggleExisting.
-// Both the PID and app id must match: normal Chrome windows are never targets.
+// Launcher supplies expectedPid, expectedClass, expiresAt, callbackService, waitForWindow, toggleExisting.
+// Both the PID and app id must match: normal Chrome windows are never targets. The app id
+// follows the configured dashboard host (open_dashboard.py chrome_app_id).
 var finished = false;
 var closing = null;
 var watched = [];
 function matches(window) {
     return Number(window.pid) === expectedPid &&
-        String(window.resourceClass) === 'chrome-127.0.0.1__-Default';
+        String(window.resourceClass) === expectedClass;
 }
 function finish(result, window) {
     if (finished) return;

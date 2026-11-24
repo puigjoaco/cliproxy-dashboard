@@ -2,7 +2,8 @@
     "KPlugin": {
         "Id": "org.kde.plasma.routerpersonal",
         "Name": "Router personal",
-        "Description": "Estado del router de cuentas y acceso al panel",
+        "Description": "Account router status and dashboard access",
+        "Description[es]": "Estado del router de cuentas y acceso al panel",
         "Icon": "network-connect",
         "Version": "1.0.0",
         "License": "MIT",

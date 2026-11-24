@@ -6,20 +6,46 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 
-URL = 'http://127.0.0.1:8320'
+DEFAULT_URL = 'http://127.0.0.1:8320'
 HERE = Path(__file__).resolve().parent
+# Written only into a profile directory this helper created; uninstall deletes nothing without it.
+PROFILE_MARKER = '.router-personal-tray-profile'
 _application = None
+_LOOPBACK = re.compile(r'(https?)://(localhost|router\.localhost|127\.0\.0\.1)(?::(\d{1,5}))?/?', re.IGNORECASE | re.ASCII)
 
 
-def browser_arguments(profile):
+def normalize_url(value):
+    """The same allowed dashboard hosts and root path as status.js, else None."""
+    match = _LOOPBACK.fullmatch(value.strip()) if isinstance(value, str) else None
+    if not match:
+        return None
+    port = None if match[3] is None else int(match[3])
+    if port is not None and not 1 <= port <= 65535:
+        return None
+    return match[1].lower() + '://' + match[2].lower() + ('' if port is None else f':{port}')
+
+
+def chrome_app_id(url):
+    """Chrome's app id for --app=url in this dedicated profile's Default directory.
+
+    Chrome names it "chrome-" + host + "_" + path + "-" + profile directory and replaces
+    characters that are illegal in file names with "_" (shell_integration_linux.cc,
+    GetXdgAppIdForWebApp). The port is not part of it: :8320 and :9000 share one id.
+    """
+    host = _LOOPBACK.fullmatch(normalize_url(url))[2]
+    return re.sub(r'["*/:<>?\\|]', '_', f'chrome-{host}_/-Default')
+
+
+def browser_arguments(profile, url=None):
     return [f'--user-data-dir={profile}', '--no-first-run', '--no-default-browser-check',
-            '--disable-features=Translate', '--disable-notifications', f'--app={URL}']
+            '--disable-features=Translate', '--disable-notifications'] + ([f'--app={url}'] if url else [])
 
 
 def browser_pid(profile):
@@ -40,7 +66,7 @@ def browser_pid(profile):
     return None
 
 
-def control_window(pid, profile, wait, launch=None):
+def control_window(pid, profile, wait, url, launch=None):
     # Optional at runtime: missing QtDBus is a normal fallback to the default browser.
     from PyQt6.QtCore import QCoreApplication, QEventLoop, QObject, QTimer, pyqtClassInfo, pyqtSlot
     from PyQt6.QtDBus import QDBus, QDBusConnection, QDBusMessage
@@ -91,6 +117,7 @@ def control_window(pid, profile, wait, launch=None):
     source = ('var expectedPid = ' + str(pid) + ';\nvar expiresAt = ' +
               str(int(time.time() * 1000) + timeout_ms) + ';\nvar callbackService = ' +
               json.dumps(service) + ';\nvar waitForWindow = ' + json.dumps(wait) + ';\n' +
+              'var expectedClass = ' + json.dumps(chrome_app_id(url)) + ';\n' +
               'var toggleExisting = true;\n' +
               (HERE / 'activate.js').read_text())
     timer = QTimer()
@@ -130,9 +157,20 @@ def browser_context():
         raise RuntimeError('No se encontró Chrome o Chromium')
     data_home = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
     directory = data_home / 'router-personal-tray'
+    if directory.is_symlink() or (directory / 'browser').is_symlink():
+        raise RuntimeError('El perfil del panel no puede ser un enlace simbólico')
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     profile = (directory / 'browser').resolve()
     return browser, directory, profile
+
+
+def ensure_profile(profile):
+    """Create the dedicated profile and mark it as ours; an existing directory is left unmarked."""
+    try:
+        profile.mkdir(mode=0o700)
+    except FileExistsError:
+        return
+    (profile / PROFILE_MARKER).write_text('Created by Router personal. Its uninstaller may delete this directory.\n')
 
 
 @contextmanager
@@ -164,7 +202,7 @@ def warm_browser():
     with profile_lock(directory):
         if browser_pid(profile) is not None:
             raise RuntimeError('El navegador se inició mientras se preparaba el servicio')
-        profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+        ensure_profile(profile)
         state = profile / 'Local State'
         preferences = json.loads(state.read_text()) if state.exists() else {}
         preferences.setdefault('background_mode', {})['enabled'] = False
@@ -204,29 +242,33 @@ def warm_browser():
         child.stdout.close()
 
 
-def open_dashboard():
+def open_dashboard(url=DEFAULT_URL):
+    if normalize_url(url) is None:
+        raise RuntimeError('La dirección del panel no es local')
+    url = normalize_url(url)
     browser, directory, profile = browser_context()
     # Serialize requests, including rapid clicks during browser startup.
     with profile_lock(directory):
+        ensure_profile(profile)
         pid = browser_pid(profile)
         if pid is not None:
             def launch():
-                subprocess.Popen([browser] + browser_arguments(profile), stdin=subprocess.DEVNULL,
+                subprocess.Popen([browser] + browser_arguments(profile, url), stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-            result = control_window(pid, profile, True, launch)
+            result = control_window(pid, profile, True, url, launch)
         else:
             # Gate exec until KWin is listening, so skipTaskbar/skipSwitcher are
             # applied at window creation, before any attention request can flash.
             read_fd, write_fd = os.pipe()
             try:
                 child = subprocess.Popen(['/usr/bin/python3', str(HERE / 'open_dashboard.py'),
-                                          '--launch-browser', str(read_fd), browser, str(profile)],
+                                          '--launch-browser', str(read_fd), browser, str(profile), url],
                                          pass_fds=(read_fd,), stdin=subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                          start_new_session=True)
                 os.close(read_fd)
                 read_fd = None
-                result = control_window(child.pid, profile, True, lambda: os.write(write_fd, b'1'))
+                result = control_window(child.pid, profile, True, url, lambda: os.write(write_fd, b'1'))
             finally:
                 if read_fd is not None:
                     os.close(read_fd)
@@ -251,18 +293,23 @@ if __name__ == '__main__':
         # This exec child receives two anonymous pipes from the supervisor.
         os.dup2(0, 3, inheritable=True)
         os.dup2(1, 4, inheritable=True)
-        arguments = browser_arguments(Path(sys.argv[3]))[:-1]
+        arguments = browser_arguments(Path(sys.argv[3]))
         os.execv(sys.argv[2], [sys.argv[2]] + arguments +
                  ['--remote-debugging-pipe', '--no-startup-window'])
-    if len(sys.argv) == 5 and sys.argv[1] == '--launch-browser':
+    if len(sys.argv) == 6 and sys.argv[1] == '--launch-browser':
         fd = int(sys.argv[2])
         ready = os.read(fd, 1) == b'1'
         os.close(fd)
         if not ready:
             sys.exit(1)
-        os.execv(sys.argv[3], [sys.argv[3]] + browser_arguments(Path(sys.argv[4])))
+        os.execv(sys.argv[3], [sys.argv[3]] + browser_arguments(Path(sys.argv[4]), sys.argv[5]))
     try:
-        warm_browser() if sys.argv[1:] == ['--warm-browser'] else open_dashboard()
+        if sys.argv[1:] == ['--warm-browser']:
+            warm_browser()
+        elif len(sys.argv) == 3 and sys.argv[1] == '--url':
+            open_dashboard(sys.argv[2])
+        else:
+            open_dashboard()
     except Exception as error:
         print(str(error), file=sys.stderr)
         # The applet uses Qt.openUrlExternally on a nonzero exit.

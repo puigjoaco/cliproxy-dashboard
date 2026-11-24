@@ -135,8 +135,9 @@ What has been tested: this setup runs daily on the original Kubuntu machine. The
 ## Plasma 6 system tray
 
 [Router personal](desktop/plasma-tray/README.md) keeps the router status and a
-one-click link to the dashboard next to the clock. Install it in the desktop
-user's Plasma session with `python3 desktop/plasma-tray/install.py` (no sudo).
+one-click link to the dashboard next to the clock, in Spanish or English, with a
+configurable dashboard address. Install it in the desktop user's Plasma session
+with `python3 desktop/plasma-tray/install.py` (no sudo).
 
 ## Update an existing installation
 

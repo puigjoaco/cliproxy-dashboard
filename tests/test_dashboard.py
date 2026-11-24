@@ -222,6 +222,7 @@ class DashboardTests(unittest.TestCase):
                            'Content-Type': 'application/json', 'Content-Length': str(len(content)),
                            **(headers or {})}
         handler.rfile = io.BytesIO(content)
+        handler.server = Mock(server_port=8320)
         handler.connection = Mock()
         handler.send = Mock()
         handler.do_POST()
@@ -1251,6 +1252,15 @@ done.catch(error=>{process.stderr.write(String(error));process.exitCode=1;});
         result = app.quota_windows({'rate_limit': {'primary_window': {'used_percent': 56, 'limit_window_seconds': 604800}}})
         self.assertEqual(result[0]['remaining'], 44)
 
+    def test_host_protection_accepts_only_the_actual_custom_port_and_legacy_ports(self):
+        for host in app.ALLOWED_HOSTS:
+            for port in (80, 8320, 18320, 9000):
+                self.assertTrue(app.valid_host(f'{host}:{port}', 9000))
+        self.assertFalse(app.valid_host('localhost:9000'))
+        for host in ('localhost:9001', 'evil.test:9000', '127.0.0.2:9000', '[::1]:9000',
+                     'user@localhost:9000', 'localhost:65536', 'localhost:invalid'):
+            self.assertFalse(app.valid_host(host, 9000), host)
+
     def test_host_and_origin_protection(self):
         self.assertTrue(app.valid_host('router.localhost'))
         self.assertTrue(app.valid_host('127.0.0.1:18320'))
@@ -1272,6 +1282,16 @@ done.catch(error=>{process.stderr.write(String(error));process.exitCode=1;});
                         return response.status, response.read()
                 except urllib.error.HTTPError as error:
                     return error.code, error.read()
+            # The ephemeral listener exercises the same port lookup as --port 9000.
+            self.assertEqual(status('/', {})[0], 200)
+            self.assertEqual(status('/api/health', {'X-Router-Request': '1'})[0], 200)
+            for host in app.ALLOWED_HOSTS:
+                headers = {'Host': f'{host}:{httpd.server_port}', 'X-Router-Request': '1',
+                           'Origin': f'http://{host}:{httpd.server_port}'}
+                self.assertEqual(status('/api/health', headers)[0], 200)
+            for host in ('evil.test', '127.0.0.2', '[::1]'):
+                headers = {'Host': f'{host}:{httpd.server_port}', 'X-Router-Request': '1'}
+                self.assertEqual(status('/api/health', headers)[0], 421)
             self.assertEqual(status('/api/health', {'Host':'evil.test','X-Router-Request':'1'})[0], 421)
             self.assertEqual(status('/api/health', {'Host':'router.localhost'})[0], 403)
             self.assertEqual(status('/api/health', {'Host':'router.localhost','X-Router-Request':'1','Origin':'https://evil.test'})[0], 403)

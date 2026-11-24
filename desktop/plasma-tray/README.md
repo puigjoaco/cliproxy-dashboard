@@ -1,9 +1,9 @@
 # Router personal · Plasma 6
 
-A read-only tray widget for the local account router. Left click opens
-`http://127.0.0.1:8320` in its own **Personal Router** window; hover shows its health in Spanish.
-The context menu can open the dashboard or copy its address. Middle click does
-nothing. It polls `/api/health` every 30 seconds with a five-second timeout and
+A read-only tray widget for the local account router. Left click opens the
+dashboard (`http://127.0.0.1:8320` by default) in its own **Personal Router**
+window; hover shows its health. The context menu can open the dashboard, copy
+its address or switch the language. Middle click does nothing. It polls `/api/health` every 30 seconds with a five-second timeout and
 never sends notifications or changes router settings.
 
 From the desktop user's Plasma 6 session, without sudo:
@@ -31,8 +31,8 @@ The window uses Chrome/Chromium app mode and a dedicated profile under
 `$XDG_DATA_HOME/router-personal-tray/browser` (normally
 `~/.local/share/router-personal-tray/browser`). The tray icon toggles the window:
 if closed, it opens in front; if already open (even behind another window or
-minimized), it really closes. The context action **Abrir panel del router** uses
-the same toggle. Concurrent requests are serialized to avoid duplicate windows.
+minimized), it really closes. The context action **Abrir panel del router** /
+**Open router dashboard** uses the same toggle. Concurrent requests are serialized to avoid duplicate windows.
 
 The service keeps only this dedicated browser warm, with **no windows** while
 idle. Closing the dashboard destroys its window; the browser process stays ready
@@ -55,8 +55,16 @@ removes its unit before deleting the dedicated profile.
 
 The dashboard window is hidden from the taskbar and Alt+Tab. The installer adds
 one KWin window rule, `router-personal-dashboard`, that matches only the exact
-app id `chrome-127.0.0.1__-Default`; KWin applies it before the task manager sees
-the window, so it never flashes there. `--uninstall` removes the rule. A
+app id of the dashboard window, `chrome-127.0.0.1__-Default` for the default
+address; KWin applies it before the task manager sees the window, so it never
+flashes there. `--uninstall` removes the rule. Chrome builds that id from the
+address's host and path and this profile's `Default` directory, not from the
+port (`chrome-` + host + `_/` + `-Default`, with `/`, `:` and other characters
+that are invalid in file names replaced by `_`): a dashboard on another port
+needs no new rule. After setting another host in the widget (`localhost` or
+`router.localhost`), run the installer again with that address, for example
+`python3 desktop/plasma-tray/install.py --url http://localhost:8320`; the KWin
+script below follows the widget's address on every toggle either way. A
 short-lived KWin script also sets `skipTaskbar` and `skipSwitcher`, clears
 attention, and activates the window. The script matches both the app id and the
 verified browser PID for this profile; neither selects normal Chrome windows.
@@ -69,8 +77,12 @@ the tray icon is the entry point.
 Activation needs `/usr/bin/python3` with PyQt6 QtDBus (`python3-pyqt6` on Kubuntu).
 If the browser is missing or window control fails, the applet opens the URL in
 the default browser instead. Normal Chrome's profile and focus policy are
-unchanged. Uninstall removes the dedicated browser profile; close the dashboard
-window before uninstalling.
+unchanged. The helper creates the dedicated profile directory itself and marks
+it with `.router-personal-tray-profile`. Uninstall deletes the profile only with
+that marker, never through a symbolic link, and only after the service has
+stopped; otherwise it keeps the directory and prints its path. A profile created
+before the marker existed is kept; delete it by hand if wanted. Close the
+dashboard window before uninstalling.
 
 To remove it:
 
@@ -78,19 +90,39 @@ To remove it:
 python3 desktop/plasma-tray/install.py --uninstall
 ```
 
+Uninstall continues when no system tray, Plasma session or KDE tool is left: it
+removes what it can (tray entry, window rule, service, package, marked profile)
+and then reports anything it could not clean up.
+
+## Settings
+
+**Configure Router personal…** in the context menu sets the dashboard address,
+for a dashboard started with another `--port`. Only `http` or `https` addresses
+on this computer (`localhost`, `router.localhost` or `127.0.0.1`) at the root path are
+accepted; until the field holds one, the widget keeps using
+`http://127.0.0.1:8320` and the page says so. The address is used for polling,
+copying and the dashboard window. Changing it checks the new address
+immediately.
+
+The widget speaks Spanish when the system language is Spanish and English
+otherwise. **Switch to English** / **Cambiar a español** in the context menu
+changes it and saves the choice in the widget's configuration. The installer's
+messages follow `LC_ALL`, `LC_MESSAGES` or `LANG` the same way.
+
 The icon follows Plasma's text colour with the approved 16/22 px symbolic mark.
 Orange means attention, red means no response, and a dim mark means checking.
 The applet always reports Plasma's `Active` status and the installer pins it as
 shown, so it stays next to the clock. It does not use `NeedsAttention`, which
 would make Plasma pulse the icon; the badge colour alone signals a problem.
 
-The shared state mapping is `package/contents/code/status.js`; verify with:
+The shared state mapping and both languages are in
+`package/contents/code/status.js`; verify with:
 
 ```sh
 node tests/test_plasma_tray.cjs
 node --check desktop/plasma-tray/package/contents/code/status.js
 node --check desktop/plasma-tray/package/contents/code/activate.js
-python3 tests/test_plasma_tray_launcher.py
+python3 -m unittest tests.test_plasma_tray_launcher
 ```
 
 A bounded live check on Chrome 158 / Plasma 6.6 measured approximately 1.0–1.15 s

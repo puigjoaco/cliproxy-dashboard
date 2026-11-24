@@ -10,9 +10,11 @@ import "../code/status.js" as RouterStatus
 PlasmoidItem {
     id: root
 
-    readonly property string dashboardUrl: RouterStatus.DASHBOARD_URL
+    // An invalid saved address falls back to the default; the settings page says so.
+    readonly property string dashboardUrl: RouterStatus.dashboardUrl(Plasmoid.configuration.dashboardUrl)
+    readonly property string language: RouterStatus.language(Plasmoid.configuration.language, Qt.locale().uiLanguages)
     property var observation: RouterStatus.initial(Date.now())
-    property var view: RouterStatus.describe(observation, Date.now())
+    property var view: RouterStatus.describe(observation, Date.now(), language, dashboardUrl)
     property var request: null
     property bool openingDashboard: false
     readonly property url iconUrl: Qt.resolvedUrl("../icons/router-" + view.kind + "-22.svg")
@@ -21,7 +23,7 @@ PlasmoidItem {
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
     Plasmoid.icon: iconUrl
     Plasmoid.title: "Router personal"
-    Plasmoid.hasConfigurationInterface: false
+    Plasmoid.hasConfigurationInterface: true
     toolTipMainText: view.title
     toolTipSubText: view.tooltip
     toolTipTextFormat: Text.PlainText
@@ -36,7 +38,9 @@ PlasmoidItem {
         openingDashboard = true;
         var path = decodeURIComponent(Qt.resolvedUrl("../code/open_dashboard.py").toString().replace(/^file:\/\//, ""));
         // Quote the installed path, including spaces or apostrophes in XDG_DATA_HOME.
-        var command = "/usr/bin/python3 '" + path.replace(/'/g, "'\\''") + "'";
+        // dashboardUrl is a validated loopback address; quote it anyway.
+        var quote = function (value) { return "'" + value.replace(/'/g, "'\\''") + "'"; };
+        var command = "/usr/bin/python3 " + quote(path) + " --url " + quote(dashboardUrl);
         launcher.connectSource(command);
     }
 
@@ -51,11 +55,29 @@ PlasmoidItem {
         }
     }
 
+    function refreshView() {
+        view = RouterStatus.describe(observation, Date.now(), language, dashboardUrl);
+    }
+    onLanguageChanged: refreshView()
+    // A new address is a different dashboard: start over and check it now.
+    onDashboardUrlChanged: {
+        if (request) {
+            var xhr = request;
+            request = null;
+            timeout.stop();
+            xhr.onreadystatechange = function () {};
+            xhr.abort();
+        }
+        observation = RouterStatus.initial(Date.now());
+        refreshView();
+        poll();
+    }
+
     function finish(data) {
         timeout.stop();
         request = null;
         observation = RouterStatus.receive(observation, data, Date.now());
-        view = RouterStatus.describe(observation, Date.now());
+        refreshView();
     }
 
     function poll() {
@@ -86,18 +108,24 @@ PlasmoidItem {
 
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
-            text: "Abrir panel del router"
+            text: RouterStatus.text(root.language, "open")
             icon.name: "globe"
             onTriggered: root.openDashboard()
         },
         PlasmaCore.Action {
-            text: "Copiar dirección del panel"
+            text: RouterStatus.text(root.language, "copy")
             icon.name: "edit-copy"
             onTriggered: {
                 clipboard.selectAll();
                 clipboard.copy();
                 clipboard.deselect();
             }
+        },
+        PlasmaCore.Action {
+            // Saved in the widget's configuration; replaces following the system language.
+            text: RouterStatus.text(root.language, "switchLanguage")
+            icon.name: "languages"
+            onTriggered: Plasmoid.configuration.language = RouterStatus.otherLanguage(root.language)
         }
     ]
 
@@ -124,11 +152,7 @@ PlasmoidItem {
         repeat: true
         onTriggered: root.poll()
     }
-    Component.onCompleted: {
-        var configure = Plasmoid.internalAction("configure");
-        if (configure) configure.visible = false;
-        poll();
-    }
+    Component.onCompleted: poll()
     Component.onDestruction: {
         if (request) {
             request.onreadystatechange = function () {};

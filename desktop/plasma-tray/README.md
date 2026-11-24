@@ -20,6 +20,12 @@ restarted. Run the same command after updating the package; Plasma may keep the 
 keeps the previous behaviour, log out and back in when convenient; the installer
 never does this automatically. A new installation loads immediately.
 
+On Plasma Wayland, Chrome may receive the dashboard tab without coming to the
+front; its taskbar entry only asks for attention. A KWin window rule for
+`google-chrome` with **Focus stealing prevention: None** (forced) brings it to
+the front. Add it in System Settings → Window Rules; this applies to every link
+Chrome opens, not only the dashboard.
+
 To remove it:
 
 ```sh

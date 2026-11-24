@@ -123,7 +123,7 @@ def extra_usage(raw, *, minor_units):
     # Snapshot/API contract: used and limit are major currency units. Claude
     # Code's Di formatter uses cents except for its JPY/KRW/VND allowances.
     divisor = 100 if minor_units and currency not in ('JPY', 'KRW', 'VND') else 1
-    return {'enabled': raw['is_enabled'],
+    return {'enabled': raw['is_enabled'], 'confirmed': True,
             'used': raw['used_credits'] / divisor if number(raw.get('used_credits')) else None,
             'limit': raw['monthly_limit'] / divisor if number(raw.get('monthly_limit')) else None,
             'currency': currency,
@@ -392,6 +392,9 @@ def previous_snapshot(path):
             windows.append(safe)
     extra = raw.get('extra_usage')
     extra = extra if isinstance(extra, dict) else {}
+    # Old collectors invented false when Anthropic omitted its on/off answer.
+    if extra.get('enabled') is False and extra.get('confirmed') is not True:
+        extra = {}
     extra = extra_usage({'is_enabled': extra.get('enabled'),
                          'used_credits': extra.get('used'), 'monthly_limit': extra.get('limit'),
                          'currency': extra.get('currency'), 'utilization': extra.get('utilization')},

@@ -262,6 +262,42 @@ class ClaudeUsageTests(unittest.TestCase):
         self.snapshot.write_text(json.dumps({'extra_usage': {'enabled': None, 'used': 1}}))
         self.assertIsNone(collector.previous_snapshot(self.snapshot)['extra_usage'])
 
+    def test_legacy_extra_usage_false_without_confirmation_stays_unknown(self):
+        for marker in ({}, {'confirmed': False}, {'confirmed': None},
+                       {'confirmed': 1}, {'confirmed': 'true'}):
+            for payload in ({}, {'extra_usage': None}, {'extra_usage': {'used_credits': 42}}):
+                with self.subTest(marker=marker, payload=payload):
+                    # Old-format snapshots could contain an invented false.
+                    self.snapshot.write_text(json.dumps({'extra_usage': {
+                        'enabled': False, 'used': 0, 'limit': 50, 'currency': 'USD', **marker}}))
+                    self.assertIsNone(collector.previous_snapshot(self.snapshot)['extra_usage'])
+                    result = self.collect(payload)
+                    self.assertEqual(result['status'], 'ok')
+                    self.assertIsNone(result['extra_usage'])
+                    self.assertIsNone(json.loads(self.snapshot.read_text())['extra_usage'])
+
+    def test_confirmed_extra_usage_false_survives_omissions_and_failure(self):
+        result = self.collect({'extra_usage': {'is_enabled': False, 'used_credits': 42}})
+        extra = result['extra_usage']
+        self.assertIs(extra['enabled'], False)
+        self.assertIs(extra['confirmed'], True)
+        self.assertEqual(json.loads(self.snapshot.read_text())['extra_usage'], extra)
+        self.assertEqual(collector.previous_snapshot(self.snapshot)['extra_usage'], extra)
+        for payload in ({}, {'extra_usage': None}, {'extra_usage': {'used_credits': 99}}):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.collect(payload)['extra_usage'], extra)
+        self.make_due()
+        with patch.object(collector, 'fetch_usage', side_effect=URLError('fixture')):
+            failed = collector.collect(self.credentials, self.snapshot, self.now + 30)
+        self.assertEqual(failed['status'], 'error')
+        self.assertEqual(failed['extra_usage'], extra)
+        self.assertEqual(json.loads(self.snapshot.read_text())['extra_usage'], extra)
+
+    def test_legacy_extra_usage_true_remains_known(self):
+        self.snapshot.write_text(json.dumps({'extra_usage': {'enabled': True, 'used': 3.2}}))
+        self.assertIs(collector.previous_snapshot(self.snapshot)['extra_usage']['enabled'], True)
+        self.assertIs(self.collect()['extra_usage']['enabled'], True)
+
     def test_ineligible_reason_publication_and_allowlisting(self):
         for reason, expected in (('surface', 'surface'), ('not_available', 'not_available'),
                                  ('a' * 32, 'a' * 32), ('a' * 33, 'other'),
@@ -429,7 +465,7 @@ class ClaudeUsageTests(unittest.TestCase):
         self.assertEqual(rows[-1]['label'], 'Weekly · Fable')
         self.assertEqual(rows[-1]['model'], 'Fable')
         self.assertEqual(rows[-1]['remaining'], 39)
-        self.assertEqual(extra, {'enabled': True, 'used': 3.2, 'limit': 50,
+        self.assertEqual(extra, {'enabled': True, 'confirmed': True, 'used': 3.2, 'limit': 50,
                                  'utilization': 6.4, 'currency': 'USD'})
 
     def test_extra_usage_normalizes_once_and_preserves_major_units_on_failure(self):

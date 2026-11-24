@@ -451,10 +451,12 @@ class DashboardTests(unittest.TestCase):
                 self.assertEqual(result['windows'][1]['label'], 'Weekly · Fable')
                 # No answer from Anthropic stays unknown on the watch path; it must never read as "Off".
                 self.assertIsNone(result['extra_usage'])
-                for unknown in ({}, {'used': 5, 'limit': 50}, {'enabled': None}, {'enabled': 'false'}, {'enabled': 0}):
+                for unknown in ({}, {'used': 5, 'limit': 50}, {'enabled': None}, {'enabled': 'false'}, {'enabled': 0},
+                                {'enabled': False}, {'enabled': False, 'confirmed': False},
+                                {'enabled': False, 'confirmed': 1}, {'enabled': False, 'confirmed': 'true'}):
                     path.write_text(json.dumps(dict(raw, extra_usage=unknown)))
                     self.assertIsNone(app.watch_accounts(now)[0]['extra_usage'], unknown)
-                path.write_text(json.dumps(dict(raw, extra_usage={'enabled': False})))
+                path.write_text(json.dumps(dict(raw, extra_usage={'enabled': False, 'confirmed': True})))
                 self.assertEqual(app.watch_accounts(now)[0]['extra_usage'], {'enabled': False, 'used': None,
                                  'limit': None, 'currency': None, 'utilization': None})
                 path.write_text(json.dumps(raw))

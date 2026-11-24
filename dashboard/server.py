@@ -254,6 +254,9 @@ def watch_account(path, account_id, account_label, resets_enabled, now=None, *, 
         windows.append(public)
     extra = raw.get('extra_usage')
     extra = extra if isinstance(extra, dict) else {}
+    # Old collectors invented false when Anthropic omitted its on/off answer.
+    if extra.get('enabled') is False and extra.get('confirmed') is not True:
+        extra = {}
     currency = extra.get('currency')
     # A snapshot without Anthropic's on/off answer keeps extra usage unknown, never "Off".
     extra = {'enabled': extra['enabled'],

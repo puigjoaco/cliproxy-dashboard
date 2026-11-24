@@ -23,11 +23,35 @@ def remove_browser_profile(data_home):
     (data_home / 'router-personal-tray/open.lock').unlink(missing_ok=True)
 
 
+RULE = 'router-personal-dashboard'
+# KWin applies rules before Plasma's task manager sees a new window, so the
+# dashboard never flashes there. Exact class match: only the dedicated window.
+RULE_KEYS = {'Description': 'Router personal: dashboard window', 'wmclass': 'chrome-127.0.0.1__-Default',
+             'wmclassmatch': '1', 'wmclasscomplete': 'false', 'skiptaskbar': 'true', 'skiptaskbarrule': '2',
+             'skipswitcher': 'true', 'skipswitcherrule': '2', 'skippager': 'true', 'skippagerrule': '2'}
+
+
+def set_window_rule(remove):
+    config = ('--file', 'kwinrulesrc')
+    names = [n for n in run('kreadconfig6', *config, '--group', 'General', '--key', 'rules').split(',')
+             if n and n != RULE]
+    if remove:
+        for key in RULE_KEYS:
+            run('kwriteconfig6', *config, '--group', RULE, '--key', key, '--delete')
+    else:
+        for key, value in RULE_KEYS.items():
+            run('kwriteconfig6', *config, '--group', RULE, '--key', key, value)
+        names.append(RULE)
+    run('kwriteconfig6', *config, '--group', 'General', '--key', 'rules', ','.join(names))
+    run('kwriteconfig6', *config, '--group', 'General', '--key', 'count', str(len(names)))
+    run('qdbus6', 'org.kde.KWin', '/KWin', 'org.kde.KWin.reconfigure')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--uninstall', action='store_true')
     args = parser.parse_args()
-    for tool in ('kpackagetool6', 'qdbus6'):
+    for tool in ('kpackagetool6', 'qdbus6', 'kreadconfig6', 'kwriteconfig6'):
         if not shutil.which(tool):
             parser.error(f'Falta {tool}; ejecuta este script en una sesión de Plasma 6.')
     config_home = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
@@ -83,6 +107,7 @@ if (!count) throw new Error("No se encontró una bandeja del sistema; añade una
     print(result)
     if 'Error' in result or 'Bandejas actualizadas: 0' in result:
         raise RuntimeError('Plasma no pudo actualizar la bandeja; no se reinició la sesión.')
+    set_window_rule(args.uninstall)
     if args.uninstall:
         print(run('kpackagetool6', '--type', 'Plasma/Applet', '--remove', PLUGIN))
         remove_browser_profile(data_home)

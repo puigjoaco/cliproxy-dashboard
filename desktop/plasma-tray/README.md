@@ -27,12 +27,15 @@ if closed, it opens in front; if already open (even behind another window or
 minimized), it really closes. The context action **Abrir panel del router** uses
 the same toggle. Concurrent requests are serialized to avoid duplicate windows.
 
-The dashboard window is hidden from the taskbar and Alt+Tab. A short-lived KWin
-script sets `skipTaskbar` and `skipSwitcher` on creation, clears attention, and
-activates it. The script matches both the app id and the verified browser PID
-for this profile; it never selects normal Chrome windows or installs window
-rules. It stops responding after eight seconds even if its helper crashes, and
-is unloaded after each use. Browser startup waits until the script is listening,
+The dashboard window is hidden from the taskbar and Alt+Tab. The installer adds
+one KWin window rule, `router-personal-dashboard`, that matches only the exact
+app id `chrome-127.0.0.1__-Default`; KWin applies it before the task manager sees
+the window, so it never flashes there. `--uninstall` removes the rule. A
+short-lived KWin script also sets `skipTaskbar` and `skipSwitcher`, clears
+attention, and activates the window. The script matches both the app id and the
+verified browser PID for this profile; neither selects normal Chrome windows.
+It stops responding after eight seconds even if its helper crashes, and is
+unloaded after each use. Browser startup waits until the script is listening,
 so the window is hidden before activation. No application launcher is installed:
 the tray icon is the entry point.
 

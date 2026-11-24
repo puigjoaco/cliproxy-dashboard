@@ -27,12 +27,13 @@ card. Provider responses are reduced to allowlisted fields.
 ## Account-card details
 
 - Claude shows the provider-reported 5× or 20× tier when available, and a
-  confirmed **Extra usage: Off** state. Missing data is not treated as off or
-  as a zero balance.
+  confirmed **Extra usage: Off** state. Missing data stays unknown through the
+  gateway and the standalone watch collector; it is never shown as off or as a
+  zero balance.
 - Claude and Antigravity retain **Renews —** when no date is available. The
   account menu can store a confirmed billing date. Allowance resets never
   supply billing renewal dates.
-- Speed and routing controls have explicit headings and values. A missing
+- The routing switch and speed slider keep their existing layout. A missing
   speed plugin means **Speed setting not applied**; an unknown enforcement
   state means **Speed setting not verified**. The explanation remains in the
   tooltip, and saved choices are preserved. The

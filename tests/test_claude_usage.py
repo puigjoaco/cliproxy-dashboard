@@ -243,6 +243,25 @@ class ClaudeUsageTests(unittest.TestCase):
         self.assertEqual(previous['resets'], result['resets'])
         self.assertTrue(self.collect({'five_hour': None, 'extra_usage': None})['extra_usage']['enabled'])
 
+    def test_extra_usage_without_anthropic_answer_stays_unknown(self):
+        # No prior value and no on/off answer: unknown, never a confirmed "Off".
+        for extra in (None, {}, {'used_credits': 42}, {'is_enabled': None}, {'is_enabled': 'false'}, {'is_enabled': 0}):
+            with self.subTest(extra=extra):
+                self.snapshot.unlink(missing_ok=True)
+                payload = {'five_hour': {'utilization': 10}} if extra is None else {'five_hour': {'utilization': 10}, 'extra_usage': extra}
+                result = self.collect(payload)
+                self.assertEqual(result['status'], 'ok')
+                self.assertIsNone(result['extra_usage'])
+                self.assertIsNone(json.loads(self.snapshot.read_text())['extra_usage'])
+                self.assertIsNone(collector.previous_snapshot(self.snapshot)['extra_usage'])
+                self.make_due()
+        self.assertFalse(self.collect({'extra_usage': {'is_enabled': False}})['extra_usage']['enabled'])
+        self.make_due()
+        # A later read without the answer keeps the confirmed value instead of erasing or inventing one.
+        self.assertFalse(self.collect({'extra_usage': {'used_credits': 42}})['extra_usage']['enabled'])
+        self.snapshot.write_text(json.dumps({'extra_usage': {'enabled': None, 'used': 1}}))
+        self.assertIsNone(collector.previous_snapshot(self.snapshot)['extra_usage'])
+
     def test_ineligible_reason_publication_and_allowlisting(self):
         for reason, expected in (('surface', 'surface'), ('not_available', 'not_available'),
                                  ('a' * 32, 'a' * 32), ('a' * 33, 'other'),

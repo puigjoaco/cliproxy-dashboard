@@ -137,9 +137,7 @@ def t3_health(runtime_path=None, proc_root=Path('/proc')):
 
 
 def daemon_health():
-    t3 = t3_health()
-    if t3 is not None:
-        return t3
+    # The Codex daemon serves Phone Remote and Mac SSH; T3 is reported beside it, never instead of it.
     try:
         result = subprocess.run([
             '/usr/sbin/runuser', '-u', USER, '--', '/usr/bin/env',
@@ -210,6 +208,7 @@ def main():
     previous = read(STATE / 'health.json')
     write(STATE / 'health.json', {'checked_at': dt.datetime.now(dt.timezone.utc).isoformat(),
                                 'codex': daemon_health(),
+                                't3': t3_health(),
                                 'usage_collection': usage_health(previous.get('usage_collection'))})
     deliver()
 

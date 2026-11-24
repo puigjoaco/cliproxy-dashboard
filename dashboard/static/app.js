@@ -416,8 +416,8 @@ accountEvents.addEventListener('pointerout',event=>{
 accountEvents.addEventListener('focusin',event=>{const b=stateButton(event);if(b?.matches?.(':focus-visible'))showStateTip(b);});
 accountEvents.addEventListener('focusout',event=>{const b=stateButton(event);if(b && stateTip?.id===b.id && !stateTip.pinned)hideStateTip();});
 // Cards on one line end level. A card without a routing row (an API key) keeps an empty one when a card beside it has
-// one, and the dates take the height of the tallest beside them. Space after routing matches any notes beside it,
-// keeping controls level even when only one account has a warning. The status has its own line (style.css).
+// one, and the dates take the height of the tallest beside them, so the facts, status and routing rows match across
+// providers. The status has its own line (style.css), so it never shrinks to its icon.
 const reservedRoute='<div class="account-route reserved" aria-hidden="true" hidden><span class="route-toggle"></span></div>';
 // Shown elements grouped by the line they sit on. Tops within a few pixels share a line: a sub-pixel difference
 // (fractional heights above them) must not split one.
@@ -433,10 +433,9 @@ function visualLines(items) {
 function reserveCardRows() {
   const cards=[...document.querySelectorAll('.gateway .account-card')];
   for(const card of cards) {
-    const slot=card.querySelector('.account-route.reserved'), facts=card.querySelector('.account-dates'), route=card.querySelector('.account-route');
+    const slot=card.querySelector('.account-route.reserved'), facts=card.querySelector('.account-dates');
     if(slot)slot.hidden=true;
     if(facts)facts.style.minHeight='';
-    if(route)route.style.marginBottom='';
   }
   // Cards share rows only with cards of the same density (a short board widget's condensed cards, boards.js fitAccounts).
   const density=card=>card.closest('[data-density]')?.dataset.density||'';
@@ -447,15 +446,6 @@ function reserveCardRows() {
       for(const card of line){const slot=card.querySelector('.account-route.reserved');if(slot)slot.hidden=false;}
     const facts=line.map(card=>card.querySelector('.account-dates')).filter(Boolean), heights=facts.map(f=>f.getBoundingClientRect().height), tallest=Math.max(0,...heights);
     facts.forEach((f,i)=>{if(heights[i]<tallest)f.style.minHeight=tallest+'px';});
-    const routes=line.map(card=>card.querySelector('.account-route')).filter(r=>r && !r.hidden);
-    const tails=routes.map(route=>{
-      const bottom=route.getBoundingClientRect().bottom;
-      let end=bottom;
-      for(let note=route.nextElementSibling;note;note=note.nextElementSibling)
-        if(note.offsetParent)end=Math.max(end,note.getBoundingClientRect().bottom);
-      return end-bottom;
-    }), longest=Math.max(0,...tails);
-    routes.forEach((route,i)=>{if(tails[i]<longest)route.style.marginBottom=(longest-tails[i])+'px';});
   }
 }
 // Gateway availability on Codex and other providers: a disabled account is neutral; anything short of ready needs attention.
@@ -897,7 +887,7 @@ function claudeRoutingRow(a) {
   const offline = failed || current?.gateway?.online !== true;
   const disabled = !known || current?.read_only || offline || pending;
   const title = loading ? 'Checking routing' : !known ? 'Account identity not verified' : current?.read_only ? 'Change routing from your computer dashboard' : offline ? 'Gateway unreachable' : '';
-  return `<div class="account-route"><span class="route-toggle"><label for="claude-route-${esc(a.id)}">${routeLabel(loading || !known ? null : enabled,pending)}</label><input id="claude-route-${esc(a.id)}" data-claude-route="${esc(a.id)}" type="checkbox" role="switch" aria-label="Use for routing" ${loading || !known ? 'class="unknown" aria-checked="mixed"' : enabled ? 'checked' : ''} ${disabled ? 'disabled' : ''} ${pending ? 'aria-busy="true"' : ''} ${title ? `title="${title}"` : ''}></span></div>
+  return `<div class="account-route"><span class="route-toggle"><label for="claude-route-${esc(a.id)}">Use for routing</label><input id="claude-route-${esc(a.id)}" data-claude-route="${esc(a.id)}" type="checkbox" role="switch" ${loading || !known ? 'class="unknown" aria-checked="mixed"' : enabled ? 'checked' : ''} ${disabled ? 'disabled' : ''} ${pending ? 'aria-busy="true"' : ''} ${title ? `title="${title}"` : ''}></span></div>
     ${claudeRouteConfirm.has(a.routing_id) ? `<div class="route-confirm" role="alert"><span>No other Claude account is ready.</span><div><button type="button" class="reset-primary confirm" id="claude-route-off-${esc(a.id)}" data-claude-route-off="${esc(a.id)}">Turn off</button><button type="button" class="reset-cancel" id="claude-route-keep-${esc(a.id)}" data-claude-route-keep="${esc(a.id)}">Keep on</button></div></div>` : ''}
     ${claudeRouteErrors.has(a.id) ? `<div class="fast-usage error" role="status">${esc(claudeRouteErrors.get(a.id))}</div>` : ''}`;
 }
@@ -1651,15 +1641,12 @@ function signinStrip(a, gateway, outcome) {
     ${detail?`<span class="account-access-detail" role="status">${esc(detail)}</span>`:''}
   </div>`;
 }
-function routeLabel(enabled, pending=false) {
-  return `<span class="route-title">Routing</span><span class="route-value">${pending ? 'Saving…' : enabled==null ? 'Checking…' : enabled ? 'On' : 'Off'}</span>`;
-}
 function routingRow(a, gateway, lead='', note='') {
   const pending=routePending.has(a.id), required=signinNeeded(a);
   const enabled=!required && (a.routing_enabled ?? !a.disabled);
   const disabled=required || accessBlocked(gateway) || pending;
   const title=required?'Sign in to use for routing':current?.read_only?'Change routing from your computer dashboard':failed||gateway.online!==true?'Gateway unreachable':'';
-  return `<div class="account-route">${lead}<span class="route-toggle"><label for="route-${esc(a.id)}">${routeLabel(enabled,pending)}</label><input id="route-${esc(a.id)}" data-route-account="${esc(a.id)}" data-access-focus="${esc(a.id+':route')}" type="checkbox" role="switch" aria-label="Use for routing" ${a.credit_spending?.paused?`aria-describedby="state-codex-${esc(a.id)}" `:''}${enabled?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''}></span></div>
+  return `<div class="account-route">${lead}<span class="route-toggle"><label for="route-${esc(a.id)}"><span class="route-use">Use for </span>routing</label><input id="route-${esc(a.id)}" data-route-account="${esc(a.id)}" data-access-focus="${esc(a.id+':route')}" type="checkbox" role="switch" aria-label="Use for routing" ${a.credit_spending?.paused?`aria-describedby="state-codex-${esc(a.id)}" `:''}${enabled?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''}></span></div>
     ${note}${routeConfirm.has(a.id)?`<div class="route-confirm" role="alert"><span>No other Codex account is ready.</span><div><button type="button" class="reset-primary confirm" data-route-off="${esc(a.id)}" data-access-focus="${esc(a.id+':off')}">Turn off</button><button type="button" class="reset-cancel" data-route-keep="${esc(a.id)}" data-access-focus="${esc(a.id+':keep')}">Keep on</button></div></div>`:''}
     ${routeErrors.has(a.id)?`<div class="fast-usage error" role="status">${esc(routeErrors.get(a.id).message)}</div>`:''}`;
 }
@@ -1790,7 +1777,7 @@ accountEvents.addEventListener('pointerout',event=>{
 });
 
 // Codex speed (docs/fast-mode-policy.md): a stepped slider, Normal · Fast · Ultrafast, leads the routing row as the fast
-// mode switch did, so the card is no taller than the others. Its heading names Speed and its label the saved choice; one line under the row at
+// mode switch did, so the card is no taller than the others. Its label is the current speed; one line under the row at
 // most says what the slider can't (speedState). Ultrafast is a third stop while the account has ultrafast models, a
 // hollow one while the gateway can't apply it; with none (or the model list not read yet) the slider is a two-stop
 // switch, and a saved Ultrafast shows as Fast, which is what runs. The setting itself is kept. Choosing Ultrafast asks
@@ -1838,12 +1825,13 @@ function speedState(a, gateway) {
 }
 function speedRow(a, gateway) {
   const s=speedState(a,gateway), id=esc(a.id);
-  if(s.stops===1)return `<span class="account-speed normal-only" title="${esc(s.title)}"><span class="speed-heading">Speed</span><span class="speed-value">Normal<span class="visually-hidden">. ${esc(s.title)}</span></span></span>`;
-  return `<span class="account-speed${s.stops===2?' two':''}"><span class="speed-heading">Speed</span><label class="speed-value" for="speed-${id}">${SPEEDS.slice(0,s.stops).map(level=>`<span${level===s.level?' class="on"':''}>${SPEED_NAMES[level]}</span>`).join('')}</label><input id="speed-${id}" data-speed-account="${id}" type="range" min="0" max="${s.stops-1}" step="1" value="${s.at}" data-at="${s.at}" aria-label="Speed" aria-valuetext="${SPEED_NAMES[s.level]}"${s.status?` aria-describedby="speed-${id}-status"`:''}${s.ultraOff?' class="ultra-off"':''}${s.busy?' aria-busy="true"':''}${s.disabled?' disabled':''}${s.title?` title="${esc(s.title)}"`:''}></span>`;
+  if(s.stops===1)return `<span class="account-speed normal-only" title="${esc(s.title)}"><span class="visually-hidden">Speed: </span>Normal<span class="visually-hidden">. ${esc(s.title)}</span></span>`;
+  return `<span class="account-speed${s.stops===2?' two':''}"><label class="speed-value" for="speed-${id}">${SPEEDS.slice(0,s.stops).map(level=>`<span${level===s.level?' class="on"':''}>${SPEED_NAMES[level]}</span>`).join('')}</label><input id="speed-${id}" data-speed-account="${id}" type="range" min="0" max="${s.stops-1}" step="1" value="${s.at}" data-at="${s.at}" aria-label="Speed" aria-valuetext="${SPEED_NAMES[s.level]}"${s.status?` aria-describedby="speed-${id}-status"`:''}${s.ultraOff?' class="ultra-off"':''}${s.busy?' aria-busy="true"':''}${s.disabled?' disabled':''}${s.title?` title="${esc(s.title)}"`:''}></span>`;
 }
 function speedStatus(a, gateway) {
   const {status}=speedState(a,gateway);
-  return status ? `<div class="fast-usage${status.tone?' '+status.tone:''} speed-note" id="speed-${esc(a.id)}-status" data-speed-status="${esc(a.id)}" role="status"${status.detail?` title="${esc(status.detail)}"`:''}>${icon('alert')}<span class="speed-note-text">${status.html}</span>${status.detail?`<span class="visually-hidden">. ${esc(status.detail)}</span>`:''}</div>` : '';
+  // One line in the existing layout; the longer explanation is the tooltip and the screen-reader text.
+  return status ? `<div class="fast-usage${status.tone?' '+status.tone:''}" id="speed-${esc(a.id)}-status" data-speed-status="${esc(a.id)}" role="status"${status.detail?` title="${esc(status.detail)}"`:''}>${status.html}${status.detail?`<span class="visually-hidden">. ${esc(status.detail)}</span>`:''}</div>` : '';
 }
 function speedHold() {
   if(!speedPress && !speedKeys && !speedAsk)return false;
@@ -2301,8 +2289,11 @@ function healthItems(data) {
     detail:failed ? "This tab can't reach your desktop. It reconnects on its own." : gateway==='down' ? 'The desktop can’t reach the gateway.'
       : gateway==='stale' ? 'Account checks stopped updating. Quotas may be out of date.' : '',
     title:'Account checks by the gateway on your Linux desktop'},
-    {name:h.codex?.client==='t3' ? 'T3 Code server' : 'Codex server',status:local(h.codex?.status || 'unknown'),
-      title:h.codex?.client==='t3' ? 'The local T3 Code server process and listening port. Model requests are checked separately.' : "The Codex server on your Linux desktop, for Phone Remote and Mac SSH. OpenAI's service status is separate."}];
+    {name:'Codex server',status:local(h.codex?.status || 'unknown'),
+      title:"The Codex server on your Linux desktop, for Phone Remote and Mac SSH. OpenAI's service status is separate."}];
+  // T3 has its own light beside the Codex server, only where a T3 runtime exists.
+  if(h.t3 && typeof h.t3==='object')items.push({name:'T3 Code server',status:local(h.t3.status || 'unknown'),
+    title:'The local T3 Code server process and listening port. Model requests are checked separately.'});
   const u=h.usage_collection;
   if(u && typeof u==='object')items.push({name:'Usage collection',status:local(u.status || 'unknown'),when:healthAgo(u.last_success_at),
     detail:u.status!=='healthy' && Array.isArray(u.issues) ? u.issues[0] || '' : '',title:`Records requests for the Usage tab. Last successful run: ${dateTime(u.last_success_at)}`});
@@ -2375,7 +2366,7 @@ function genericRoutingRow(p, a, gateway, attrs='') {
   const id=p.id+':'+a.key, input=`generic-route-${p.id}-${a.key}`, pending=genericRoutePending.has(id), required=a.availability?.state==='auth_required';
   const disabled=required || accessBlocked(gateway) || pending;
   const title=required?'Sign in to use for routing':current?.read_only?'Change routing from your computer dashboard':failed||gateway.online!==true?'Gateway unreachable':'';
-  return `<div class="account-route"><span class="route-toggle"><label for="${esc(input)}">${routeLabel(a.routing_enabled && !required,pending)}</label><input id="${esc(input)}" data-generic-route="${esc(id)}" ${attrs}type="checkbox" role="switch" ${a.routing_enabled && !required?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''} aria-label="Use for routing"></span></div>
+  return `<div class="account-route"><span class="route-toggle"><label for="${esc(input)}">Use for routing</label><input id="${esc(input)}" data-generic-route="${esc(id)}" ${attrs}type="checkbox" role="switch" ${a.routing_enabled && !required?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''}></span></div>
     ${genericRouteConfirm.has(id)?`<div class="route-confirm" role="alert"><span>No other ${esc(p.name)} account is ready.</span><div><button type="button" class="reset-primary confirm" id="${esc(input)}-off" data-generic-route-off="${esc(id)}">Turn off</button><button type="button" class="reset-cancel" id="${esc(input)}-keep" data-generic-route-keep="${esc(id)}">Keep on</button></div></div>`:''}
     ${genericRouteErrors.get(id)>Date.now()?'<div class="fast-usage error" role="status">Change not confirmed. Try again.</div>':''}`;
 }

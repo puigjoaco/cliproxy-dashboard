@@ -104,6 +104,26 @@ class OperationsTests(unittest.TestCase):
                 self.assertIn(message, ' '.join(value['issues']))
                 self.usage = saved
 
+    def test_t3_is_a_separate_light_and_never_replaces_codex(self):
+        def write(**probe):
+            (self.path / 'health.json').write_text(json.dumps({'checked_at': self.stamp, **probe}))
+        write(codex={'status': 'healthy'})
+        result = ops.health(self.gateway, self.now, self.path)
+        self.assertEqual(result['codex']['status'], 'healthy')
+        self.assertNotIn('t3', result)
+        write(codex={'status': 'down'}, t3={'status': 'healthy', 'client': 't3'})
+        result = ops.health(self.gateway, self.now, self.path)
+        self.assertEqual((result['codex']['status'], result['t3']['status']), ('down', 'healthy'))
+        self.assertNotIn('client', result['codex'])
+        write(codex={'status': 'healthy'}, t3={'status': 'down'})
+        result = ops.health(self.gateway, self.now, self.path)
+        self.assertEqual((result['codex']['status'], result['t3']['status']), ('healthy', 'down'))
+        write(codex={'status': 'healthy'}, t3={'status': 'bogus'})
+        self.assertEqual(ops.health(self.gateway, self.now, self.path)['t3']['status'], 'unknown')
+        self.assertEqual(ops.health(self.gateway, self.now + 121, self.path)['t3']['status'], 'stale')
+        write(codex={'status': 'healthy'}, t3=None)
+        self.assertNotIn('t3', ops.health(self.gateway, self.now, self.path))
+
     def test_usage_health_requires_recent_observations_and_available_units(self):
         self.assertEqual(ops.health(self.gateway, self.now, self.path)['usage_collection']['status'], 'unknown')
         self.write_usage()

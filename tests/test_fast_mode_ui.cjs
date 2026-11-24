@@ -30,7 +30,7 @@ for (const rule of ['{appearance:none;margin:0;width:32px',':before{content:',':
 }
 assert.match(css,/\.account-speed input\[aria-busy=true\]\{animation:breathe 1\.6s infinite;cursor:progress\}/);
 assert.match(css,/@media\(prefers-reduced-motion:reduce\)\{\.account-speed input\[aria-busy=true\]\{opacity:\.6\}\}/);
-assert.match(css,/@container card-body \(max-width:240px\)\{\n  \.account-route:has\(>\.account-speed\)\{column-gap:10px\}/);
+assert.match(css,/@container card-body \(max-width:240px\)\{\n  \.account-route:has\(>\.account-speed\) \.route-use\{display:none\}/);
 assert.match(css,/\.account-speed\.two input\{--w:32px;--step:14px;/);
 assert.match(css,/\.account-speed input\.ultra-off\{/);
 // Notches: three stops draw a dot at every stop, over the fill; dots behind the thumb take --dot-on, and the thumb
@@ -114,7 +114,11 @@ assert.match(recentHTML,/Speed was Normal · still ran fast/);
 // ---- The slider. The real renderAccounts holds while a slider is dragged or keyed (speedHold) and keeps its focus.
 assert.match(source,/function renderAccounts\(gateway\) \{\n  if\(reorderHold\(\) \|\| speedHold\(\)\)return;\n  speedDeferred=false;/);
 assert.match(source,/routingRow\(a,gateway,speedRow\(a,gateway\),speedStatus\(a,gateway\)\)/);
-assert.match(source,/<label for="route-\$\{esc\(a\.id\)\}">\$\{routeLabel\(enabled,pending\)\}<\/label>/);
+assert.match(source,/<label for="route-\$\{esc\(a\.id\)\}"><span class="route-use">Use for <\/span>routing<\/label>/);
+// The routing switch keeps its 18px row: no Routing/Speed headings or On/Off value labels on the cards.
+assert.doesNotMatch(source,/routeLabel|route-title|route-value|speed-heading|speed-note/);
+assert.doesNotMatch(css,/route-title|route-value|speed-heading|speed-note/);
+assert.match(css,/\.account-route\.reserved \.route-toggle\{height:18px\}/);
 assert.doesNotMatch(source,/fastRow|fastStatus|saveFastMode|data-fast-account|Allow fast mode/);
 // Ultrafast has no status line of its own any more (the question says what it applies to).
 assert.doesNotMatch(source,/speedScope|on other models|Ultrafast on \$\{/);
@@ -178,7 +182,7 @@ const html = () => context.speedRow(context.current.gateway.accounts[0],context.
 const last = () => renders.at(-1);
 const thumb = markup => ({value:markup.match(/ value="(\d)"/)[1],at:markup.match(/data-at="(\d)"/)[1],max:markup.match(/ max="(\d)"/)[1],
   text:markup.match(/aria-valuetext="([^"]+)"/)[1],on:markup.match(/<span class="on">([^<]+)<\/span>/)[1],two:/account-speed two/.test(markup),
-  line:(markup.match(/<span class="speed-note-text">(.*?)<\/span>/)||[])[1]||null,tone:(markup.match(/<div class="(fast-usage(?: warn| error)?) speed-note"/)||[])[1]||null,
+  line:(markup.match(/<div class="fast-usage[^"]*"[^>]*>(.*?)(?:<span class="visually-hidden">[^<]*<\/span>)?<\/div>$/)||[])[1]||null,tone:(markup.match(/<div class="(fast-usage[^"]*)"/)||[])[1]||null,
   busy:/aria-busy="true"/.test(markup),disabled:/ disabled/.test(markup),off:/class="ultra-off"/.test(markup),title:(markup.match(/ title="([^"]+)"><\/span>/)||[])[1]||null});
 
 // A known catalog without Fast shows only a muted Normal label, even with a saved higher level or failed enforcement.
@@ -190,7 +194,7 @@ for(const level of ['normal','fast','ultrafast']) {
     const markup=html();
     assert.match(markup,/class="account-speed normal-only" title="No model on this account offers Fast"/);
     assert.match(markup,/>Normal<span class="visually-hidden">\. No model on this account offers Fast/);
-    assert.match(markup,/<span class="speed-heading">Speed<\/span>/);
+    assert.match(markup,/<span class="visually-hidden">Speed: <\/span>/);
     assert.doesNotMatch(markup,/<input|<label|fast-usage|data-speed-status|Not enforced|Couldn't save/);
     assert.equal(context.speedState(context.current.gateway.accounts[0],context.current.gateway).stops,1);
     context.fastErrors.clear();
@@ -201,7 +205,7 @@ assert.match(css,/\.account-speed\.normal-only\{font-size:11px;color:var\(--mute
 // Each level on a three-stop slider: the label is the value, in a slot that holds every name.
 for (const [level,at,name] of [['normal','0','Normal'],['fast','1','Fast'],['ultrafast','2','Ultrafast']]) {
   setAccount(view(level));const markup=html(),t=thumb(markup);
-  assert.match(markup,/^<span class="account-speed"><span class="speed-heading">Speed<\/span><label class="speed-value" for="speed-one"><span(?: class="on")?>Normal<\/span><span(?: class="on")?>Fast<\/span><span(?: class="on")?>Ultrafast<\/span><\/label><input id="speed-one" data-speed-account="one" type="range" min="0" max="2" step="1" /);
+  assert.match(markup,/^<span class="account-speed"><label class="speed-value" for="speed-one"><span(?: class="on")?>Normal<\/span><span(?: class="on")?>Fast<\/span><span(?: class="on")?>Ultrafast<\/span><\/label><input id="speed-one" data-speed-account="one" type="range" min="0" max="2" step="1" /);
   assert.match(markup,/aria-label="Speed"/);
   assert.deepEqual([t.value,t.at,t.max,t.text,t.on,t.two,t.busy,t.disabled,t.off],[at,at,'2',name,name,false,false,false,false]);
   // No line at any stop, Ultrafast included, so the card never grows.
@@ -224,7 +228,7 @@ for (const [model,name] of [[{id:'x',name:'<b>X</b>'},'&lt;b>X&lt;/b>'],[{id:'id
 for (const reason of ['no_models','catalog_pending']) {
   for (const [level,at,name] of [['normal','0','Normal'],['fast','1','Fast'],['ultrafast','1','Fast']]) {
     setAccount(view(level,{reason}));const markup=html(),t=thumb(markup);
-    assert.match(markup,/^<span class="account-speed two"><span class="speed-heading">Speed<\/span><label class="speed-value" for="speed-one"><span(?: class="on")?>Normal<\/span><span(?: class="on")?>Fast<\/span><\/label>/);
+    assert.match(markup,/^<span class="account-speed two"><label class="speed-value" for="speed-one"><span(?: class="on")?>Normal<\/span><span(?: class="on")?>Fast<\/span><\/label>/);
     assert.deepEqual([t.value,t.max,t.text,t.on,t.two,t.off,t.line,t.title],[at,'1',name,name,true,false,null,null]);
   }
 }

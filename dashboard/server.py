@@ -255,11 +255,13 @@ def watch_account(path, account_id, account_label, resets_enabled, now=None, *, 
     extra = raw.get('extra_usage')
     extra = extra if isinstance(extra, dict) else {}
     currency = extra.get('currency')
-    extra = {'enabled': extra.get('enabled') is True,
+    # A snapshot without Anthropic's on/off answer keeps extra usage unknown, never "Off".
+    extra = {'enabled': extra['enabled'],
              'used': extra.get('used') if finite(extra.get('used')) else None,
              'limit': extra.get('limit') if finite(extra.get('limit')) else None,
              'currency': currency if isinstance(currency, str) and re.fullmatch(r'[A-Z]{3}', currency) else None,
-             'utilization': extra.get('utilization') if finite(extra.get('utilization')) else None}
+             'utilization': extra.get('utilization') if finite(extra.get('utilization')) else None} \
+        if type(extra.get('enabled')) is bool else None
     checked = timestamp(raw.get('checked_at'))
     if not resets_enabled:
         measured = [row['measured_at'] for row in windows if row['kind'] in ('five_hour', 'seven_day')]

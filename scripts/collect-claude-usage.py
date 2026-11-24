@@ -115,12 +115,15 @@ def window(kind, label, used, reset, model=None, *, allow_unknown=False):
 
 def extra_usage(raw, *, minor_units):
     raw = raw if isinstance(raw, dict) else {}
+    # Only Anthropic's own boolean says on or off; anything else stays unknown.
+    if type(raw.get('is_enabled')) is not bool:
+        return None
     currency = raw.get('currency')
     currency = currency if isinstance(currency, str) and re.fullmatch(r'[A-Z]{3}', currency) else None
     # Snapshot/API contract: used and limit are major currency units. Claude
     # Code's Di formatter uses cents except for its JPY/KRW/VND allowances.
     divisor = 100 if minor_units and currency not in ('JPY', 'KRW', 'VND') else 1
-    return {'enabled': raw.get('is_enabled') is True,
+    return {'enabled': raw['is_enabled'],
             'used': raw['used_credits'] / divisor if number(raw.get('used_credits')) else None,
             'limit': raw['monthly_limit'] / divisor if number(raw.get('monthly_limit')) else None,
             'currency': currency,
@@ -517,8 +520,8 @@ def collect(credentials=CREDENTIALS, snapshot=SNAPSHOT, now=None):
             error = 'parse'
             windows, extra = parse_usage(payload)
             resets = parse_grants(payload.get('cedar_ember'), now)
-            # skip_spend may omit extra_usage. Preserve the last known value.
-            if not isinstance(payload.get('extra_usage'), dict):
+            # skip_spend may omit extra_usage or its on/off answer. Preserve the last known value.
+            if extra is None:
                 extra = data['extra_usage']
             if token in json.dumps({'windows': windows, 'extra_usage': extra, 'resets': resets, 'plan': plan, 'email': email}):
                 raise ValueError('parse')

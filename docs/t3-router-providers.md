@@ -171,10 +171,12 @@ identifiers, credentials, logs or host settings are included here.
 
 The dashboard's optional T3 health probe checks the desktop user's default
 `~/.t3/userdata/server-runtime.json`, the owner and name of its Linux `t3code`
-process, and the loopback listener. It reports **T3 Code server** rather than
-the standalone Codex daemon. An unrecognized process/runtime reports unknown;
-without the T3 runtime file, the existing Codex daemon probe remains in use.
-This is a local liveness check, not an inference or upstream status check.
+process, and the loopback listener (IPv4 or `::1`). It reports a separate
+**T3 Code server** light beside **Codex server**; the Codex daemon used by
+Phone Remote and Mac SSH is always checked as before. An unrecognized
+process/runtime reports unknown; without the T3 runtime file, no T3 light is
+shown. This is a local liveness check, not an inference or upstream status
+check.
 
 Sources:
 

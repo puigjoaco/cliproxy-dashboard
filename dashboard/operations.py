@@ -453,14 +453,14 @@ def usage_health(probe, now):
 def health(gateway, now=None, directory=OPS):
     now = time.time() if now is None else now
     probe, backup = read_json(directory / 'health.json'), read_json(directory / 'backup.json')
-    codex = probe.get('codex', {})
-    daemon = codex.get('status') if isinstance(codex, dict) else None
-    if not probe:
-        daemon = 'unknown'
-    elif not fresh(probe.get('checked_at'), now, 120):
-        daemon = 'stale'
-    if daemon not in ('healthy', 'down', 'unknown', 'stale'):
-        daemon = 'unknown'
+    def server(entry):
+        status = entry.get('status') if isinstance(entry, dict) else None
+        if not probe:
+            status = 'unknown'
+        elif not fresh(probe.get('checked_at'), now, 120):
+            status = 'stale'
+        return status if status in ('healthy', 'down', 'unknown', 'stale') else 'unknown'
+    daemon = server(probe.get('codex', {}))
     gateway_state = 'unknown'
     if gateway.get('online') is False:
         gateway_state = 'down'
@@ -484,8 +484,10 @@ def health(gateway, now=None, directory=OPS):
                   'healthy' if file.get('status') == 'active' else 'unknown')
         account_rows.append(dict(provider=file.get('type'), key=file.get('name'), email=file.get('email'),
                                  status=status, reason=None))
-    client = {'client': 't3'} if isinstance(codex, dict) and codex.get('client') == 't3' else {}
-    return {'codex': {'status': daemon, 'checked_at': probe.get('checked_at'), **client},
+    # T3 is its own light beside the Codex server, present only where the probe found a T3 runtime.
+    t3 = probe.get('t3')
+    t3 = {'t3': {'status': server(t3), 'checked_at': probe.get('checked_at')}} if isinstance(t3, dict) else {}
+    return {'codex': {'status': daemon, 'checked_at': probe.get('checked_at')}, **t3,
             'usage_collection': usage_health(probe, now),
             'gateway': {'status': gateway_state, 'checked_at': gateway.get('checked_at')},
             'accounts': account_rows,

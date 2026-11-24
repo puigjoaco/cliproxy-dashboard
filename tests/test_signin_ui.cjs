@@ -32,7 +32,7 @@ context.fixture={gateway:{accounts:[structuredClone(base)],online:true,checked_a
 vm.runInContext('current=fixture;renderAccounts(current.gateway)',context);
 const html=()=>elements.get('account-grid').innerHTML;
 assert.doesNotMatch(html(),/data-signin-start|signin-panel/);
-assert.match(html(),/<span class="route-title">Routing<\/span><span class="route-value">On<\/span><\/label>/);
+assert.match(html(),/<span class="route-use">Use for <\/span>routing<\/label>/);
 // New plan labels and unconfirmed renewal dates pass through the card renderer.
 for(const [plan,label] of [['prolite','Pro 100'],['future_super_plan','Future Super Plan']]){
   const account=context.fixture.gateway.accounts[0];
@@ -49,7 +49,6 @@ context.renderAccounts(context.fixture.gateway);
 assert.match(html(),/is-off/);assert.match(html(),/Sign in required/);
 assert.match(html(),/data-route-account="a"[^>]*disabled[^>]*title="Sign in to use for routing"/);
 assert.doesNotMatch(html(),/data-route-account="a"[^>]*checked/);
-assert.match(html(),/<span class="route-value">Off<\/span>/);
 assert.equal(context.fixture.gateway.accounts[0].disabled,false);
 assert.doesNotMatch(html(),/Quota refresh unavailable|class="account-state/);
 const session={handle:'opaque-handle-32-characters-long',state:'pending',user_code:'ABCD-EFGH',verification_url:'https://auth.openai.com/codex/device',

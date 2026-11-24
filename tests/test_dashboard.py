@@ -449,8 +449,15 @@ class DashboardTests(unittest.TestCase):
                                  ('claude', 'claude', 'Claude A', 'Max'))
                 self.assertEqual(result['windows'][0]['remaining'], 18)
                 self.assertEqual(result['windows'][1]['label'], 'Weekly · Fable')
-                self.assertEqual(result['extra_usage'], {'enabled': False, 'used': None, 'limit': None,
-                                                         'currency': None, 'utilization': None})
+                # No answer from Anthropic stays unknown on the watch path; it must never read as "Off".
+                self.assertIsNone(result['extra_usage'])
+                for unknown in ({}, {'used': 5, 'limit': 50}, {'enabled': None}, {'enabled': 'false'}, {'enabled': 0}):
+                    path.write_text(json.dumps(dict(raw, extra_usage=unknown)))
+                    self.assertIsNone(app.watch_accounts(now)[0]['extra_usage'], unknown)
+                path.write_text(json.dumps(dict(raw, extra_usage={'enabled': False})))
+                self.assertEqual(app.watch_accounts(now)[0]['extra_usage'], {'enabled': False, 'used': None,
+                                 'limit': None, 'currency': None, 'utilization': None})
+                path.write_text(json.dumps(raw))
                 self.assertNotIn('secret-not-public', json.dumps(result))
                 self.assertEqual(app.watch_accounts(now + 900)[0]['status'], 'stale')
                 self.assertEqual(app.watch_accounts(now + 901)[0]['status'], 'stale')

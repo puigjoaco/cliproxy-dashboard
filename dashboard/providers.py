@@ -154,6 +154,13 @@ def groups(gateway, watched, usage=None, billing=None):
                             public[field] = matches[0][field]
                     # A failed latest read marks kept windows as last known before they age out.
                     public['usage_status'] = matches[0].get('status')
+                profiles = [a for a in gateway.get('provider_profiles', [])
+                            if a.get('provider') == provider and a.get('key') == file['name']
+                            and a.get('auth_index') == file.get('auth_index')]
+                if len(profiles) == 1:
+                    public['subscription'] = profiles[0]
+                    if profiles[0].get('plan'):
+                        public.update(plan=profiles[0]['plan'], plan_source='provider')
             if provider != 'codex':
                 public['billing'] = (subscriptions.billing_view(file, billing) if billing is not None
                                      else public.get('billing', {}))
@@ -181,7 +188,7 @@ def groups(gateway, watched, usage=None, billing=None):
             public.setdefault('auth_index', file.get('auth_index'))
             public['models'] = copy.deepcopy(gateway.get('account_models', {}).get(file['name']))
             public['usage_refresh'] = gateway.get('usage_refresh', {}).get(provider, {}).get(
-                file.get('auth_index'), dict(supported=provider in ('codex', 'claude', 'xai'), available_at=None))
+                file.get('auth_index'), dict(supported=provider in ('codex', 'claude', 'xai', 'antigravity'), available_at=None))
             if provider not in ('codex', 'claude'):
                 public['routing_enabled'] = not disabled
             public.setdefault('availability', dict(state='disabled' if public['disabled'] else

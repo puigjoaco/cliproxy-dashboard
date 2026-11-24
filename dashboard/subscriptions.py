@@ -10,6 +10,8 @@ import time
 import usage_adapters as usage
 
 PROFILE = 'https://api.anthropic.com/api/oauth/profile'
+ANTIGRAVITY_PROFILE = 'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
+GOOGLE_BILLING_URL = 'https://one.google.com/'
 CHATGPT_BILLING = 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27'
 BILLING_URL = 'https://claude.ai/settings/billing'
 STATUSES = {'active', 'trialing', 'canceled', 'cancelled', 'expired', 'past_due',
@@ -45,8 +47,31 @@ def normalize(raw, file):
              'payment_due' if status in ('past_due', 'unpaid', 'incomplete') else
              'ok' if entitled else 'ended')
     return dict(windows=[], plan=plan, subscription_status=status, state=state, entitled=entitled,
+                usage_multiplier={'default_claude_max_5x': 5, 'default_claude_max_20x': 20}.get(tier),
                 billing_type=org.get('billing_type') if org.get('billing_type') == 'stripe_subscription' else None,
                 billing_url=BILLING_URL)
+
+
+def normalize_antigravity(raw):
+    body = usage.record(raw)
+    if 'error' in body:
+        raise ValueError('profile')
+    # A paid entitlement can coexist with the base free-tier entry.
+    paid, base = body.get('paidTier'), body.get('currentTier')
+    tier = paid if isinstance(paid, dict) and paid.get('id') else base
+    if not isinstance(tier, dict) or not isinstance(tier.get('id'), str):
+        raise ValueError('profile')
+    name = tier.get('name')
+    name = name.strip() if isinstance(name, str) and name.isprintable() and 1 <= len(name.strip()) <= 64 else None
+    credits = []
+    for item in paid.get('availableCredits', []) if isinstance(paid, dict) and isinstance(paid.get('availableCredits'), list) else []:
+        if isinstance(item, dict) and item.get('creditType') == 'GOOGLE_ONE_AI':
+            balance = usage.numeric(item.get('creditAmount'))
+            if balance is not None and balance >= 0:
+                credits.append(dict(balance=balance, credit_type='GOOGLE_ONE_AI'))
+    # An absent or ambiguous balance is unknown, never zero.
+    return dict(windows=[], plan=name, ai_credits=credits[0] if len(credits) == 1 else None,
+                billing_url=GOOGLE_BILLING_URL)
 
 
 class Profiles:
@@ -56,6 +81,8 @@ class Profiles:
     def fetch(self, file, call, usage_cache, manual=False, force=False, provider_retry_at=None):
         previous = self.cache.cached(file) or {}
         def parse(raw):
+            if file['type'] == 'antigravity':
+                return normalize_antigravity(raw)
             value = normalize(raw, file)
             before, after = plan_name(previous.get('plan')), value['plan']
             if before and after and before != after:
@@ -67,18 +94,27 @@ class Profiles:
         usage_view = usage_cache.cached(file) or {}
         # A model block returning after a retry must not start a profile read either.
         self.cache.model_retries = usage_cache.model_retries
-        event_due = usage_cache.event_due(file)
+        # Only Claude reads its profile and usage as one event. Antigravity's
+        # profile and quota endpoints keep independent failure backoffs.
+        coupled = file['type'] == 'claude'
+        event_due = coupled and usage_cache.event_due(file)
+        request = (dict(auth_index=file['auth_index'], method='POST', url=ANTIGRAVITY_PROFILE,
+                        header={'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json',
+                                'User-Agent': 'antigravity'},
+                        data=json.dumps({'metadata': {'ideType': 'ANTIGRAVITY'}}))
+                   if file['type'] == 'antigravity' else
+                   dict(auth_index=file['auth_index'], method='GET', url=PROFILE,
+                        header={'Authorization': 'Bearer $TOKEN$',
+                                'anthropic-beta': 'oauth-2025-04-20', 'Accept': 'application/json'}))
         try:
             view = self.cache.fetch(file, call, manual=manual, force=force or event_due,
                 event_windows=usage_view.get('windows', []), provider_retry_at=provider_retry_at,
-                request_body=dict(auth_index=file['auth_index'], method='GET', url=PROFILE,
-                                  header={'Authorization': 'Bearer $TOKEN$',
-                                          'anthropic-beta': 'oauth-2025-04-20', 'Accept': 'application/json'}),
+                request_body=request,
                 normalize=parse)
         except usage.RefreshError:
             # An independently cooled profile must not prevent a usage refresh.
             return self.cache.cached(file)
-        if view.get('status') == 'ok' and view.get('attempted_at') != previous.get('attempted_at'):
+        if coupled and view.get('status') == 'ok' and view.get('attempted_at') != previous.get('attempted_at'):
             # One event reads profile first, then usage; the marker retains usage Retry-After.
             usage_cache.due_now(file)
         return view
@@ -88,6 +124,9 @@ class Profiles:
         checked = usage.epoch(value.get('checked_at'))
         current = (value.get('status') == 'ok' and checked is not None
                    and 0 <= self.cache.wall_clock() - checked <= 90000)
+        if file['type'] == 'antigravity':
+            return {**{k: value.get(k) for k in ('plan', 'ai_credits', 'checked_at', 'attempted_at')},
+                    'current': current, 'error': value.get('error'), 'billing_url': GOOGLE_BILLING_URL}
         value = dict(value, plan=plan_name(value.get('plan')))
         change = value.get('plan_change')
         if change:
@@ -95,7 +134,7 @@ class Profiles:
             value['plan_change'] = change if change['previous'] != change['current'] else None
         if change and not 0 <= self.cache.wall_clock() - (usage.epoch(change.get('checked_at')) or 0) < 86400:
             value = dict(value, plan_change=None)
-        return {**{k: value.get(k) for k in ('plan', 'subscription_status', 'billing_type',
+        return {**{k: value.get(k) for k in ('plan', 'subscription_status', 'billing_type', 'usage_multiplier',
                     'checked_at', 'attempted_at', 'plan_change', 'state', 'entitled')},
                 'current': current, 'error': value.get('error'), 'billing_url': BILLING_URL}
 

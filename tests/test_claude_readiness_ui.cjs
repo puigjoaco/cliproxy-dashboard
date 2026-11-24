@@ -31,6 +31,21 @@ function harness(){
   return {c:context,data,get,sent,run:s=>vm.runInContext(s,context),render:()=>context.renderWatch(data)};
 }
 const input=(h,id)=>h.get('watch-grid').innerHTML.match(new RegExp(`<input id="claude-route-${id}"[^>]*>`))[0];
+test('confirmed Claude tier and extra-usage off are visible without inventing a balance',()=>{
+  const h=harness(), a=h.data.watch_accounts[0];
+  a.plan='Ultra';a.subscription={subscription_status:'active',state:'ok',entitled:true,
+    current:true,checked_at:a.checked_at,usage_multiplier:20};
+  assert.match(h.c.subscriptionHtml(a),/>Ultra · 20×<svg/);
+  a.extra_usage={enabled:false,used:0,currency:'USD',disabled_reason:'out_of_credits'};
+  const extra=h.c.extraUsageHtml(a);
+  assert.match(extra,/Extra usage<\/span><strong[^>]*>Off<\/strong>/);
+  assert.match(extra,/No usage credits available/);
+  assert.doesNotMatch(extra,/balance|Credits<\/span><strong>0/);
+  assert.equal(h.c.extraUsageHtml({...a,extra_usage:null}),'');
+  assert.equal(h.c.extraUsageHtml({...a,extra_usage:{}}),'');
+  a.extra_usage_checked_at=new FakeDate(clock-3600000).toISOString();
+  assert.match(h.c.extraUsageHtml(a),/Extra usage · last known/);
+});
 const faultCases=[
   ['gateway unavailable',a=>{a.runtime_available=false;},/One account ready/],
   ['gateway unknown',a=>{a.runtime_available=null;},/Status unavailable · checking/],
@@ -210,12 +225,14 @@ test('renewal date is attributed to the user and reviews two calendar days befor
   const h=harness(),a=h.data.watch_accounts[0];
   a.billing={renewal_date:'2026-11-05',confirmed:true,source:'user_confirmed',verified_at:new FakeDate(clock).toISOString()};
   const html=h.c.renewalHtml(a);
-  // Claude cards show a date only once one is set.
+  // Missing dates never become inferred billing dates; the card keeps an explained empty spot.
   assert.equal(h.c.renewalHtml({...a,billing:{}}),'');
+  assert.match(h.c.renewalHtml({...a,billing:{}},true),/title="The provider does not report a renewal date through this connection\.[^"]*"><span>Renews<\/span><strong>—<\/strong>/);
   // Six days out: inside the review week, so the date turns amber like Codex's.
   assert.match(html,/^<div class="reset-block billing-renewal renewal-soon"[^>]*><span>Renews<\/span><strong>5 Nov 2026<\/strong><\/div>$/);
   assert.match(html,/title="[^"]*Review by 3 Nov · two days before renewal\. Set by you [^"]+"/);
   h.render();assert.match(h.get('watch-grid').innerHTML,/<div class="account-dates"><div class="reset-block allowance-reset"><span>Allowance resets<\/span>.*?<\/div><div class="reset-block billing-renewal renewal-soon"[^>]*><span>Renews<\/span><strong>5 Nov 2026/);
+  a.billing={};h.render();assert.match(h.get('watch-grid').innerHTML,/<div class="reset-block billing-renewal" title="The provider does not report a renewal date through this connection\.[^"]*"><span>Renews<\/span><strong>—<\/strong>/);
 });
 test('a renewal date rolled forward from the one the user set reads as an estimate',()=>{
   const h=harness(),a=h.data.watch_accounts[0];

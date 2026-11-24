@@ -164,6 +164,13 @@
 /* The routing label and switch never separate; beside the speed slider they keep to the row's end. */
 .route-toggle{flex:1;display:flex;align-items:center;justify-content:space-between;gap:16px}
 .account-route label{font-size:11px;color:var(--muted);cursor:pointer}
+.route-toggle label{display:grid;align-content:center;gap:1px;min-height:32px;line-height:14px}
+.route-title,.speed-heading{font-size:10px;color:var(--muted);font-weight:400;line-height:14px}
+.route-value{font-size:11px;font-weight:600;color:var(--muted)}
+.route-toggle:has(input:checked) .route-value{color:var(--accent)}
+.route-toggle:has(input:disabled) label{cursor:default}
+.route-toggle:has(input.unknown) .route-value{color:var(--muted)}
+.route-toggle:has(input[aria-busy=true]) .route-value{color:var(--muted)}
 .account-route input[role=switch]{appearance:none;margin:0;width:32px;height:18px;background:var(--line);border-radius:12px;position:relative;cursor:pointer;flex-shrink:0;transition:background .15s}
 .account-route input[role=switch]:before{content:'';position:absolute;width:12px;height:12px;left:3px;top:3px;border-radius:50%;background:var(--muted);transition:left .15s}
 .account-route input[role=switch]:checked{background:var(--accent)}
@@ -174,10 +181,13 @@
    with the accent filling up to the thumb and a small dot at every stop, so it always reads as three positions. Two
    stops (no ultrafast models) is the switch's exact size, with no dots. The label before it names the current speed in
    a slot as wide as the longest name, so the track never moves under the pointer. */
-.account-speed{display:flex;align-items:center;gap:10px;min-width:0;margin-right:auto;flex-shrink:0}
+.account-speed{display:grid;grid-template-columns:max-content auto;align-items:center;column-gap:10px;row-gap:1px;min-width:0;margin-right:auto;flex-shrink:0}
 .account-speed.normal-only{font-size:11px;color:var(--muted)}
-.account-speed .speed-value{display:grid;white-space:nowrap}
-.account-speed .speed-value>span{grid-area:1/1;visibility:hidden}
+.account-speed .speed-heading{grid-area:1/1}
+.account-speed .speed-value{grid-area:2/1;display:grid;white-space:nowrap;font-size:11px;font-weight:600;color:var(--text);line-height:14px}
+.account-speed.normal-only .speed-value{color:var(--muted)}
+.account-speed>input{grid-column:2;grid-row:1/span 2}
+.account-speed .speed-value>span:not(.visually-hidden){grid-area:1/1;visibility:hidden}
 .account-speed .speed-value>span.on{visibility:visible}
 .account-speed:has(input:disabled) .speed-value{cursor:default}
 /* The fill is background layers driven by the stop (data-at): a dot at each stop (--d0 to --d2) over a round end and
@@ -249,18 +259,18 @@
 .speed-retry:hover{text-decoration-color:currentColor}
 .speed-retry:focus-visible{outline:2px solid currentColor;outline-offset:2px;border-radius:2px}
 @media(pointer:coarse){.speed-retry{padding:10px 0;margin:-10px 0;position:relative;z-index:2}}
-/* The speed stays on the routing row at every width, so the Codex card is no taller than its neighbours. The speed
-   never truncates; a narrower card tightens the gaps and shortens "Use for routing" to "Routing" (the switch keeps its
-   full name), and the narrowest (248px cards) draws the touch slider at its pointer size so "Routing" still fits. */
+.speed-note{display:flex;align-items:flex-start;gap:6px;line-height:1.5;margin-top:6px}
+.speed-note>svg{width:12px;height:12px;flex-shrink:0;margin-top:1px;color:inherit}
+.speed-note-text{min-width:0}
+/* The controls keep their headings and values at every width. Narrow cards tighten gaps; the narrowest (248px cards)
+   draws the touch slider at its pointer size so Routing and its value still fit. */
 .account-route:has(>.account-speed){flex-wrap:nowrap}
 .account-route:has(>.account-speed)>.route-toggle{flex:0 1 auto;margin-left:auto;min-width:0}
-.account-route:has(>.account-speed) .route-toggle label{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.account-route .route-toggle label::first-letter{text-transform:uppercase}
+.account-route:has(>.account-speed) .route-toggle label{min-width:0;white-space:nowrap}
 @container card-body (max-width:278px){.account-route:has(>.account-speed){column-gap:12px}.account-route:has(>.account-speed)>.route-toggle{gap:10px}}
 @container card-body (max-width:240px){
-  .account-route:has(>.account-speed) .route-use{display:none}
   .account-route:has(>.account-speed){column-gap:10px}
-  .account-route:has(>.account-speed)>.route-toggle,.account-speed{gap:8px}
+  .account-route:has(>.account-speed)>.route-toggle,.account-speed{column-gap:8px}
 }
 @media(pointer:coarse){@container card-body (max-width:224px){.account-speed:not(.two) input{--w:48px;--step:15px}}}
 .route-confirm{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;flex-wrap:wrap;margin-top:8px;font-size:10px;color:var(--amber)}
@@ -375,7 +385,7 @@ a.status-item:focus-visible{outline-width:1.5px;outline-offset:1px;border-radius
 .account-state:not(.watch-state-ok,.watch-state-warn,.watch-state-down) .state-text svg{color:var(--faint)}
 /* A card without a routing row keeps an invisible one when a card beside it has one (reserveCardRows in app.js). */
 .account-route.reserved{visibility:hidden}
-.account-route.reserved .route-toggle{height:18px}
+.account-route.reserved .route-toggle{height:32px}
 .limit-rows{display:flex;flex-direction:column;gap:11px;margin-top:16px}
 .limit-row .secondary-quota{margin:0 0 5px}
 .limit-row .secondary-quota>span:last-child{font-family:var(--mono);font-size:9px;color:var(--muted);white-space:nowrap}

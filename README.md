@@ -108,7 +108,9 @@ Prerequisites: Kubuntu on x86_64 (Linux amd64) with systemd, Python 3.11+, and N
 
 9. **Connect T3 Code.** Configure provider instances through T3 settings, preserving other instances. The settings live at `~/.t3/userdata/settings.json` under `providerInstances`: the `codex` instance's `config.homePath` must name the Codex home from step 7; `config.binaryPath` selects the Codex executable and `config.launchArgs` holds its arguments. The `claudeAgent` instance needs environment rows for `ANTHROPIC_BASE_URL=http://127.0.0.1:8317`, `ANTHROPIC_AUTH_TOKEN=<gateway-client-key>` marked sensitive, `ENABLE_TOOL_SEARCH=true`, `CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, and `NO_PROXY=127.0.0.1,localhost`. Clear conflicting direct-provider auth/backend variables as the [Claude launcher](scripts/claude-gateway.py) does.
 
-   Check: start a new conversation with each T3 provider and find both requests and their accounts in the dashboard's requests list. A configured endpoint alone does not prove the client uses it.
+   Use a stable CLI entry point that T3 recognizes, rather than a path into one version's installation directory. The [T3 provider guide](docs/t3-router-providers.md) covers native updates, preserving an existing Codex instance, and connecting T3's managed Antigravity agent through the gateway with its existing subscription accounts.
+
+   Check: start a new conversation with each configured T3 provider and find its requests and account in the dashboard's requests list. Also verify a tool call. A configured endpoint or an authentication label alone does not prove the client uses it.
 
 - Optional: [T3 usage hub](docs/t3-usage-hub.md) adds separately keyed, read-only allowance reporting.
 - Optional: [Tailscale access](docs/private-previews.md) provides private access from other devices; SSH forwarding keeps gateway management on loopback.
@@ -142,6 +144,8 @@ The final `Fast-mode plugin:` step reports a build/install/hot-reload verificati
 - **Usage:** today, the last seven days or all recorded history, with account/model totals and a request chart. All-history charts show up to the latest 30 days.
 - **System:** gateway status, routing and affinity settings, recording status and advanced management.
 - The theme button switches between dark and light and remembers the browser's preference.
+
+Antigravity cards show [reported Gemini allowance and account details](docs/antigravity-allowance.md), including shared quota grouping and explicit unknown billing dates.
 
 Unknown allowance is shown as unavailable. Refresh failures preserve and label the last known reading. Recorded usage refreshes every 15 seconds.
 

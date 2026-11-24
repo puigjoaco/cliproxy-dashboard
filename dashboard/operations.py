@@ -484,7 +484,8 @@ def health(gateway, now=None, directory=OPS):
                   'healthy' if file.get('status') == 'active' else 'unknown')
         account_rows.append(dict(provider=file.get('type'), key=file.get('name'), email=file.get('email'),
                                  status=status, reason=None))
-    return {'codex': {'status': daemon, 'checked_at': probe.get('checked_at')},
+    client = {'client': 't3'} if isinstance(codex, dict) and codex.get('client') == 't3' else {}
+    return {'codex': {'status': daemon, 'checked_at': probe.get('checked_at'), **client},
             'usage_collection': usage_health(probe, now),
             'gateway': {'status': gateway_state, 'checked_at': gateway.get('checked_at')},
             'accounts': account_rows,

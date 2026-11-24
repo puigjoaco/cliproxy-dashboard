@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import socket
 import subprocess
 import sys
 import time
@@ -108,7 +109,37 @@ def write(path, data, mode=0o640):
     tmp.replace(path)
 
 
+def t3_health(runtime_path=None, proc_root=Path('/proc')):
+    """Check the real T3 server, not an unrelated standalone Codex daemon."""
+    runtime_path = runtime_path or HOME / '.t3/userdata/server-runtime.json'
+    if not runtime_path.exists():
+        return None
+    result = {'status': 'unknown', 'client': 't3'}
+    try:
+        runtime = json.loads(runtime_path.read_text())
+        pid, port, host = runtime.get('pid'), runtime.get('port'), runtime.get('host')
+        if (type(pid) is not int or pid <= 1 or type(port) is not int or
+                not 1 <= port <= 65535 or host not in ('127.0.0.1', 'localhost', '::1')):
+            return result
+        process = proc_root / str(pid)
+        if process.stat().st_uid != DESKTOP.pw_uid or (process / 'comm').read_text().strip() != 't3code':
+            return result
+        os.kill(pid, 0)
+        connection = socket.create_connection((host, port), timeout=2)
+        connection.close()
+        return dict(result, status='healthy')
+    except PermissionError:
+        return result
+    except OSError:
+        return dict(result, status='down')
+    except (ValueError, TypeError, AttributeError):
+        return result
+
+
 def daemon_health():
+    t3 = t3_health()
+    if t3 is not None:
+        return t3
     try:
         result = subprocess.run([
             '/usr/sbin/runuser', '-u', USER, '--', '/usr/bin/env',

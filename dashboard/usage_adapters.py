@@ -27,6 +27,7 @@ MODEL_BLOCK_QUIET = 900
 RESET_DROP = 5
 CLAUDE_URL = 'https://api.anthropic.com/api/oauth/usage'
 XAI_URL = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits'
+ANTIGRAVITY_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels'
 XAI_HEADERS = {
     'Authorization': 'Bearer $TOKEN$', 'x-xai-token-auth': 'xai-grok-cli',
     'x-grok-client-version': '1.0.46', 'accept': '*/*',
@@ -220,12 +221,17 @@ def normalize_claude(payload):
     currency = extra.get('currency')
     currency = currency if isinstance(currency, str) and re.fullmatch(r'[A-Z]{3}', currency) else None
     divisor = 1 if currency in ('JPY', 'KRW', 'VND') else 100
-    return dict(windows=windows, independent_windows=False, extra_usage={
+    result = dict(windows=windows, independent_windows=False, extra_usage={
         'enabled': extra.get('is_enabled') is True,
         'used': extra['used_credits'] / divisor if number(extra.get('used_credits')) else None,
         'limit': extra['monthly_limit'] / divisor if number(extra.get('monthly_limit')) else None,
         'currency': currency,
         'utilization': extra.get('utilization') if number(extra.get('utilization')) else None})
+    if type(extra.get('is_enabled')) is not bool:
+        result['extra_usage'] = None
+    elif extra.get('disabled_reason') in ('out_of_credits', 'user_disabled', 'spend_limit_reached'):
+        result['extra_usage']['disabled_reason'] = extra['disabled_reason']
+    return result
 
 
 def normalize_xai(payload):
@@ -258,8 +264,48 @@ def normalize_xai(payload):
     return {'windows': windows}
 
 
+def normalize_antigravity(payload):
+    models = record(payload).get('models')
+    if not isinstance(models, dict):
+        raise ValueError('no_usage_data')
+    windows, seen = [], set()
+    for model_id, model in models.items():
+        if not isinstance(model_id, str) or not model_id.startswith('gemini-') or not isinstance(model, dict):
+            continue
+        quota = model.get('quotaInfo')
+        if not isinstance(quota, dict):
+            continue
+        fraction = quota.get('remainingFraction')
+        reset = quota.get('resetTime')
+        # Protobuf JSON omits the default value 0. A reported reset identifies
+        # an exhausted bucket even when remainingFraction is absent.
+        if fraction is None and epoch(reset) is not None:
+            fraction = 0
+        if not number(fraction) or not 0 <= fraction <= 1:
+            continue
+        if reset is not None and epoch(reset) is None:
+            continue
+        label = model.get('displayName')
+        label = label if isinstance(label, str) and label.strip() else model_id
+        identity = (label, fraction, epoch(reset))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        windows.append(window(label, (1 - fraction) * 100, reset,
+                              kind='model_quota', slot=model_id, model=model_id))
+    windows.sort(key=lambda row: (row['model'] != 'gemini-3-flash', row['label']))
+    return {'windows': windows}
+
+
 def request(file):
     provider = file['type']
+    if provider == 'antigravity':
+        project = file.get('project_id')
+        if not isinstance(project, str) or not project.strip():
+            raise ValueError('missing_project')
+        return dict(auth_index=file['auth_index'], method='POST', url=ANTIGRAVITY_URL,
+                    header={'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json',
+                            'User-Agent': 'antigravity'}, data=json.dumps({'project': project}))
     headers = dict(XAI_HEADERS) if provider == 'xai' else {
         'Authorization': 'Bearer $TOKEN$', 'anthropic-beta': 'oauth-2025-04-20',
         'Accept': 'application/json'}
@@ -477,7 +523,7 @@ class UsageCache:
             entry['invalidated'] = entry['inflight']
 
     def available(self, file, provider_retry_at=None):
-        supported = file.get('type') in ('codex', 'claude', 'xai') and not api_keys.is_api_key_row(file)
+        supported = file.get('type') in ('codex', 'claude', 'xai', 'antigravity') and not api_keys.is_api_key_row(file)
         with self.lock:
             entry = self.entries.get((file.get('type'), file.get('auth_index')), {})
             remaining = max(0, entry.get('provider_due', 0) - self.clock(),
@@ -663,7 +709,7 @@ class UsageCache:
                      provider=file.get('type'), email=file.get('email'), id=file.get('name'),
                      windows=[], status='unavailable', error=None, checked_at=None,
                      usage_checked_at=None, usage_source='gateway', attempted_at=None)
-        if (file.get('type') not in ('codex', 'claude', 'xai') or not file.get('name')
+        if (file.get('type') not in ('codex', 'claude', 'xai', 'antigravity') or not file.get('name')
                 or not file.get('auth_index') or api_keys.is_api_key_row(file)):
             return empty
         watch = matched_claude_watch(file, runtime_rows, watched) if file['type'] == 'claude' else None
@@ -752,7 +798,9 @@ class UsageCache:
                 view['auth_state'] = 'sign_in_required'
             if status != 200:
                 raise ValueError('http')
-            normalized = (normalize or (normalize_claude if file['type'] == 'claude' else normalize_xai))(response.get('body'))
+            normalizer = normalize or {'claude': normalize_claude, 'antigravity': normalize_antigravity}.get(
+                file['type'], normalize_xai)
+            normalized = normalizer(response.get('body'))
             if not normalized['windows'] and file['type'] != 'codex' and not self.allow_empty:
                 raise ValueError('no_usage_data')
             if file['type'] == 'claude' and normalize is None and 'extra_usage' not in record(response.get('body')):

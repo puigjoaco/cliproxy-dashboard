@@ -133,6 +133,14 @@ test('System tab: health rows first, routing only where a provider has two or mo
   assert.equal($('system-status').textContent,'Stale');assert.equal($('system-status').className,'small-badge system-badge warn');
   assert.match($('system-details').innerHTML,/<dd class="health-value health-stale" title="Account checks stopped updating\. Quotas may be out of date\.">/);
 });
+test('T3 health names the actual client server',()=>{
+  const data=use(fixture());data.health.codex.client='t3';
+  c.renderSystem(data);c.renderOperations(data);
+  assert.match($('system-details').innerHTML,/<dt>T3 Code server<\/dt>/);
+  assert.match($('health-panel').innerHTML,/>T3 Code server</);
+  data.health.codex.status='down';
+  assert.match(c.healthSummary(c.healthItems(data)).text,/T3 Code server down/);
+});
 test('markup: unique ids, a working refresh button, the health button and popover, provider-neutral copy',()=>{
   const ids=[...html.matchAll(/\sid="([^"]+)"/g)].map(m=>m[1]);
   assert.deepEqual(ids.filter((id,i)=>ids.indexOf(id)!==i),[],'duplicate ids: $() would return the first, as the refresh symbol did');

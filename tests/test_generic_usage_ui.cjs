@@ -66,17 +66,17 @@ assert.match(other,/<div class="quota-label">Requests per day<\/div>/);assert.ma
 // header has it) and reads "—" until the user sets a date; a plan the user set is the badge, attributed in its tooltip.
 const editable={billing_editable:{renewal:true,plan:true},billing:{}};
 const unset=card({...editable,windows:[monthly],usage_checked_at:ago(180)});
-assert.match(unset,/<span>Credits reset<\/span><strong[^>]*>12d 4h<\/strong><\/div><div class="reset-block billing-renewal"><span>Renews<\/span><strong>—<\/strong><\/div><\/div>/);
+assert.match(unset,/<span>Credits reset<\/span><strong[^>]*>12d 4h<\/strong><\/div><div class="reset-block billing-renewal" title="The provider does not report a renewal date through this connection\."><span>Renews<\/span><strong>—<\/strong><\/div><\/div>/);
 assert.doesNotMatch(unset,/Success today|small-badge|title="Set it from/);
 const userSet=card({billing_editable:{renewal:true,plan:true},plan:'SuperGrok',plan_source:'user',windows:[monthly],usage_checked_at:ago(180),
   billing:{renewal_date:'2026-11-21',confirmed:true,source:'user_confirmed',verified_at:ago(60),plan:'SuperGrok'}});
 assert.match(userSet,/<span class="small-badge" title="Set by you">SuperGrok<\/span>/);
 assert.match(userSet,/<div class="reset-block billing-renewal[^"]*" title="[^"]*Set by you [^"]+"><span>Renews<\/span><strong>21 Nov 2026<\/strong><\/div>/);
 // Without usage windows the date follows the last request.
-assert.match(card(editable),/<span>Last request<\/span><strong>4m ago<\/strong><\/div><div class="reset-block billing-renewal"><span>Renews<\/span><strong>—<\/strong><\/div><\/div>/);
+assert.match(card(editable),/<span>Last request<\/span><strong>4m ago<\/strong><\/div><div class="reset-block billing-renewal" title="The provider does not report a renewal date through this connection\."><span>Renews<\/span><strong>—<\/strong><\/div><\/div>/);
 // With account actions the empty spot says where to set it; API keys never get one.
 vm.runInContext('current.add_providers=[];',c);
-assert.match(card(editable),/<div class="reset-block billing-renewal" title="Set it from the account menu"><span>Renews<\/span>/);
+assert.match(card(editable),/<div class="reset-block billing-renewal" title="The provider does not report a renewal date through this connection\. Set the confirmed date from the account menu\."><span>Renews<\/span>/);
 vm.runInContext('delete current.add_providers;',c);
 assert.doesNotMatch(card({...editable,kind:'api_key',auth_index:'k'}),/Renews/);
 
@@ -103,4 +103,53 @@ assert.match(off,pill('','off','Disabled','Updated 3m ago'));
 assert.match(card({availability:{state:'quota_exhausted'}}),pill('warn','alert','Quota exhausted'));
 const signin=card({availability:{state:'auth_required'},windows:[monthly],usage_checked_at:ago(180)});
 assert.match(signin,/Sign in required/);assert.doesNotMatch(signin,/account-state/);assert.match(signin,/64<span class="percent">/);
-console.log('Generic usage UI: requests-today fallback, billing windows, secondary bars, freshness, stale and reset-due windows passed');
+// Google fractions are rendered from the reported observation, including a true
+// zero and an unknown reset, without fabricating a weekly or five-hour period.
+const google={id:'antigravity',name:'Antigravity',accent:'antigravity',accounts:[]};
+const googleWindow={label:'Gemini 3 Flash',kind:'model_quota',used:.07127,remaining:99.92873,resets_at:now+18000};
+const googleAccount={...base,provider:'antigravity',windows:[googleWindow],usage_checked_at:ago(30),usage_status:'ok'};
+const googleHtml=c.genericCard(google,googleAccount,gateway);
+assert.match(googleHtml,/Gemini 3 Flash/);
+assert.match(googleHtml,/99\.9<span class="percent">%/);
+assert.match(googleHtml,/width:99\.92873%/);
+assert.match(googleHtml,/aria-valuenow="99\.92873"/);
+assert.doesNotMatch(googleHtml,/Weekly|5-hour|credits|Gemini 4 Neon/);
+const googleEmpty=c.genericCard(google,{...googleAccount,windows:[{...googleWindow,used:100,remaining:0}]},gateway);
+assert.match(googleEmpty,/aria-valuenow="0"/);
+const googleDue=c.genericCard(google,{...googleAccount,windows:[{...googleWindow,resets_at:now-1}]},gateway);
+assert.doesNotMatch(googleDue,/aria-valuenow/);
+assert.match(googleDue,/Waiting for usage data/);
+// Only matching observations from Google's documented shared Gemini pool are
+// collapsed. Independent limits and unknown or older observations stay visible.
+const flash={...googleWindow,model:'gemini-3-flash',measured_at:ago(30)};
+const pro={...flash,model:'gemini-2.5-pro',label:'Gemini 2.5 Pro'};
+const sharedGoogle=c.genericCard(google,{...googleAccount,windows:[flash,pro]},gateway);
+assert.match(sharedGoogle,/Gemini · shared quota/);
+assert.doesNotMatch(sharedGoogle,/Gemini 2.5 Pro|class="limit-row/);
+assert.match(sharedGoogle,/width:99\.92873%/);
+for(const independent of [{...pro,used:25}, {...pro,resets_at:now+86400},
+  {...pro,measured_at:ago(90)}, {...pro,model:'claude-fable',label:'Fable'},
+  {...pro,kind:'weekly_model',label:'Weekly · Fable'}]) {
+  const distinct=c.genericCard(google,{...googleAccount,windows:[flash,independent]},gateway);
+  assert.match(distinct,/class="limit-row/);
+}
+assert.equal(c.quotaWindowsForCard({...googleAccount,provider:'xai',windows:[flash,pro]}).length,2);
+assert.equal(c.quotaWindowsForCard({...googleAccount,windows:[{...flash,resets_at:null},{...pro,resets_at:null}]}).length,2);
+// The paid plan comes from the bound Google profile; a missing balance never
+// produces a zero-credit counter or an invented renewal date.
+const googleDetails={...googleAccount,plan:'Google AI Pro',plan_source:'provider',
+  subscription:{plan:'Google AI Pro',checked_at:ago(30),current:true,ai_credits:null}};
+const googlePlan=c.genericCard(google,googleDetails,gateway);
+assert.match(googlePlan,/href="https:\/\/one.google.com\/"/);
+assert.match(googlePlan,/>Google AI Pro<svg/);
+assert.match(googlePlan,/Reported by Google/);
+assert.doesNotMatch(googlePlan,/AI credits|Renew[s]?/);
+const googleCredit=c.genericCard(google,{...googleDetails,subscription:{...googleDetails.subscription,
+  ai_credits:{credit_type:'GOOGLE_ONE_AI',balance:42}}},gateway);
+assert.match(googleCredit,/<span>AI credits<\/span><strong>42<\/strong>/);
+assert.doesNotMatch(googleCredit,/Use credits|data-credits/);
+const oldGoogle=c.genericCard(google,{...googleDetails,subscription:{...googleDetails.subscription,
+  checked_at:ago(3600),current:false,ai_credits:{credit_type:'GOOGLE_ONE_AI',balance:0}}},gateway);
+assert.match(oldGoogle,/AI credits · last known<\/span><strong>0<\/strong>/);
+assert.match(oldGoogle,/Reported by Google · last known/);
+console.log('Generic usage UI: requests-today fallback, billing windows, Google quotas, secondary bars, freshness, stale and reset-due windows passed');

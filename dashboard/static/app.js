@@ -416,8 +416,8 @@ accountEvents.addEventListener('pointerout',event=>{
 accountEvents.addEventListener('focusin',event=>{const b=stateButton(event);if(b?.matches?.(':focus-visible'))showStateTip(b);});
 accountEvents.addEventListener('focusout',event=>{const b=stateButton(event);if(b && stateTip?.id===b.id && !stateTip.pinned)hideStateTip();});
 // Cards on one line end level. A card without a routing row (an API key) keeps an empty one when a card beside it has
-// one, and the dates take the height of the tallest beside them, so the facts, status and routing rows match across
-// providers. The status has its own line (style.css), so it never shrinks to its icon.
+// one, and the dates take the height of the tallest beside them. Space after routing matches any notes beside it,
+// keeping controls level even when only one account has a warning. The status has its own line (style.css).
 const reservedRoute='<div class="account-route reserved" aria-hidden="true" hidden><span class="route-toggle"></span></div>';
 // Shown elements grouped by the line they sit on. Tops within a few pixels share a line: a sub-pixel difference
 // (fractional heights above them) must not split one.
@@ -433,9 +433,10 @@ function visualLines(items) {
 function reserveCardRows() {
   const cards=[...document.querySelectorAll('.gateway .account-card')];
   for(const card of cards) {
-    const slot=card.querySelector('.account-route.reserved'), facts=card.querySelector('.account-dates');
+    const slot=card.querySelector('.account-route.reserved'), facts=card.querySelector('.account-dates'), route=card.querySelector('.account-route');
     if(slot)slot.hidden=true;
     if(facts)facts.style.minHeight='';
+    if(route)route.style.marginBottom='';
   }
   // Cards share rows only with cards of the same density (a short board widget's condensed cards, boards.js fitAccounts).
   const density=card=>card.closest('[data-density]')?.dataset.density||'';
@@ -446,6 +447,15 @@ function reserveCardRows() {
       for(const card of line){const slot=card.querySelector('.account-route.reserved');if(slot)slot.hidden=false;}
     const facts=line.map(card=>card.querySelector('.account-dates')).filter(Boolean), heights=facts.map(f=>f.getBoundingClientRect().height), tallest=Math.max(0,...heights);
     facts.forEach((f,i)=>{if(heights[i]<tallest)f.style.minHeight=tallest+'px';});
+    const routes=line.map(card=>card.querySelector('.account-route')).filter(r=>r && !r.hidden);
+    const tails=routes.map(route=>{
+      const bottom=route.getBoundingClientRect().bottom;
+      let end=bottom;
+      for(let note=route.nextElementSibling;note;note=note.nextElementSibling)
+        if(note.offsetParent)end=Math.max(end,note.getBoundingClientRect().bottom);
+      return end-bottom;
+    }), longest=Math.max(0,...tails);
+    routes.forEach((route,i)=>{if(tails[i]<longest)route.style.marginBottom=(longest-tails[i])+'px';});
   }
 }
 // Gateway availability on Codex and other providers: a disabled account is neutral; anything short of ready needs attention.
@@ -741,6 +751,15 @@ function extraUsageText(extra) {
   if (extra.used != null && extra.limit != null) return `${currency(extra.used,extra.currency)} of ${currency(extra.limit,extra.currency)}`;
   return extra.used != null ? `${currency(extra.used,extra.currency)} used` : 'On';
 }
+function extraUsageHtml(a) {
+  const extra=a.extra_usage;
+  if(typeof extra?.enabled!=='boolean')return '';
+  const checked=a.extra_usage_checked_at || a.checked_at, age=Date.now()-Date.parse(checked);
+  const stale=!Number.isFinite(age) || age<0 || age>900000 || a.status==='error';
+  const reason={out_of_credits:'No usage credits available',user_disabled:'Disabled by you',spend_limit_reached:'Spending limit reached'}[extra.disabled_reason] || '';
+  const detail=[reason,Number.isFinite(extra.used) ? currency(extra.used,extra.currency)+' used' : '',checked ? 'As of '+dateTime(checked) : ''].filter(Boolean).join(' · ');
+  return `<div class="reset-block"><span title="${esc(detail)}">Extra usage${stale ? ' · last known' : ''}</span><strong title="${esc(detail)}">${esc(extraUsageText(extra))}</strong></div>`;
+}
 function watchFor(id) { return (current?.watch_accounts || []).find(a => a.id === id) || providerData().find(p=>p.id==='claude')?.accounts.map(a=>({...a,id:a.watch_id || a.key})).find(a=>a.id===id); }
 function watchResets(a) { return a?.resets && typeof a.resets === 'object' ? a.resets : null; }
 function watchGrants(r) { return Array.isArray(r?.grants) ? r.grants.filter(g => g && typeof g === 'object') : []; }
@@ -806,7 +825,8 @@ function subscriptionHtml(a) {
   const status=payment?'Payment due':ended?'Subscription ended':{active:'Active',trialing:'Trial',paused:'Subscription paused'}[s.subscription_status] || 'Subscription unknown';
   const change=s.plan_change, changeAge=Date.now()-Date.parse(change?.checked_at);
   const changed=change && claudePlanName(change.previous)!==claudePlanName(change.current) && changeAge>=0 && changeAge<86400000 ? ` · Plan changed: ${claudePlanName(change.previous)} → ${claudePlanName(change.current)}` : '';
-  const text=payment || ended || status==='Subscription paused' || !plan ? status : plan, state=`${status}${current?'':' · last known'}`;
+  const multiplier=[5,20].includes(s.usage_multiplier) ? ` · ${s.usage_multiplier}×` : '';
+  const text=payment || ended || status==='Subscription paused' || !plan ? status : plan+multiplier, state=`${status}${current?'':' · last known'}`;
   const action=payment?'Pay':ended?'Renew':'Billing';
   const title=`${plan ? plan+' · ' : ''}${state}${changed} · ${s.checked_at ? 'As of '+dateTime(s.checked_at) : 'Profile not verified'}${s.error ? ' · Profile refresh unavailable' : ''} · ${payment || ended ? action+' in' : 'Open'} Claude billing`;
   return planBadge(text,{href,attrs,tone:payment?'warn':ended?'down':'',title,label:`${text}${text===status ? state.slice(status.length) : ' · '+state} · ${action}`});
@@ -818,7 +838,7 @@ function renewalHtml(a, placeholder=false) {
   if(a.billing?.source==='renewal_inferred'){const b=BillingDates.describe(a.billing), set=BillingDates.describe({renewal_date:a.billing.entered_date}).date;
     return renewalBlock(b,b.label,`You set ${set}, and the subscription was still active ${dateTime(a.billing.inferred_at)}. Set the date again to correct it.`);}
   if(a.billing?.renewal_date)return renewalBlock(BillingDates.describe(a.billing),'Renews',`Set by you ${dateTime(a.billing.verified_at)}.`);
-  return placeholder ? `<div class="reset-block billing-renewal"${accountActions() ? ' title="Set it from the account menu"' : ''}><span>Renews</span><strong>—</strong></div>` : '';
+  return placeholder ? `<div class="reset-block billing-renewal" title="The provider does not report a renewal date through this connection.${accountActions() ? ' Set the confirmed date from the account menu.' : ''}"><span>Renews</span><strong>—</strong></div>` : '';
 }
 // One dialog sets or clears either value: f.field is the request's field, renewal_date or plan.
 const billingDate = f => f.field==='renewal_date';
@@ -877,7 +897,7 @@ function claudeRoutingRow(a) {
   const offline = failed || current?.gateway?.online !== true;
   const disabled = !known || current?.read_only || offline || pending;
   const title = loading ? 'Checking routing' : !known ? 'Account identity not verified' : current?.read_only ? 'Change routing from your computer dashboard' : offline ? 'Gateway unreachable' : '';
-  return `<div class="account-route"><span class="route-toggle"><label for="claude-route-${esc(a.id)}">Use for routing</label><input id="claude-route-${esc(a.id)}" data-claude-route="${esc(a.id)}" type="checkbox" role="switch" ${loading || !known ? 'class="unknown" aria-checked="mixed"' : enabled ? 'checked' : ''} ${disabled ? 'disabled' : ''} ${pending ? 'aria-busy="true"' : ''} ${title ? `title="${title}"` : ''}></span></div>
+  return `<div class="account-route"><span class="route-toggle"><label for="claude-route-${esc(a.id)}">${routeLabel(loading || !known ? null : enabled,pending)}</label><input id="claude-route-${esc(a.id)}" data-claude-route="${esc(a.id)}" type="checkbox" role="switch" aria-label="Use for routing" ${loading || !known ? 'class="unknown" aria-checked="mixed"' : enabled ? 'checked' : ''} ${disabled ? 'disabled' : ''} ${pending ? 'aria-busy="true"' : ''} ${title ? `title="${title}"` : ''}></span></div>
     ${claudeRouteConfirm.has(a.routing_id) ? `<div class="route-confirm" role="alert"><span>No other Claude account is ready.</span><div><button type="button" class="reset-primary confirm" id="claude-route-off-${esc(a.id)}" data-claude-route-off="${esc(a.id)}">Turn off</button><button type="button" class="reset-cancel" id="claude-route-keep-${esc(a.id)}" data-claude-route-keep="${esc(a.id)}">Keep on</button></div></div>` : ''}
     ${claudeRouteErrors.has(a.id) ? `<div class="fast-usage error" role="status">${esc(claudeRouteErrors.get(a.id))}</div>` : ''}`;
 }
@@ -997,7 +1017,7 @@ function renderWatchContent(data) {
     const heroQuiet = stale || (!!state.out && remaining !== 0);
     const p = !heroQuiet ? windowPace(w, remaining) : null, f = forecast(w, remaining, !heroQuiet);
     // Every card words its status the same way: a healthy one reads "Ready" (only once the gateway can route to it), its
-    // freshness in the popover. Extra usage shows only when it's on; off, it's a popover detail.
+    // freshness in the popover. Extra usage also shows a provider-confirmed off state.
     const readiness = claudeReadiness(a);
     const shownState = state.tone==='ok' && !state.out && !state.title
       ? readiness==='ready' ? 'Ready' : readiness==='unavailable' ? 'Unavailable' : state.text : state.text;
@@ -1014,7 +1034,7 @@ function renderWatchContent(data) {
       <div class="quota-track${p ? ' has-pace' : ''}" role="progressbar" aria-label="${esc(label)} · ${esc(name)} ${esc(w?.label || '')} allowance remaining" aria-valuemin="0" aria-valuemax="100" ${remaining==null?'':`aria-valuenow="${Math.round(remaining)}"`}${paceValueText(p, remaining, f)}${heroTitle(f,p)}><span style="width:${Math.min(100,remaining ?? 0)}%"></span>${paceBar(p)}</div>
       <div class="quota-used"${heroTitle(f,p)}>${forecastHtml(f)}<span class="used-figure${remaining!=null && remaining<10?' low':''}">${w?.used == null ? 'Waiting for usage data' : esc(percent(w.used))+' used'}</span>${footReset(w)}</div></div>
       <div class="account-side"><div class="limit-rows">${limits.join('')}</div>${cooldownRecoveryHtml(a)}${resets}
-      <div class="account-bottom"><div class="account-dates"><div class="reset-block allowance-reset"><span>Allowance resets</span><strong class="countdown" data-reset="${w?.resets_at || ''}" title="${w?.resets_at?esc(dateTime(w.resets_at*1000)):''}">${countdown(w?.resets_at)}</strong></div>${renewalHtml(a)}${extra.on ? `<div class="reset-block"><span title="${esc(relative(a.extra_usage_checked_at || a.checked_at))}">${esc(extra.label)}</span><strong>${esc(extraUsageText(a.extra_usage))}</strong></div>` : ''}</div>${statePill(shownState,shownState!==state.text && shownState==='Unavailable' ? 'warn' : state.tone,[state.title || state.text,extra.note,note].filter(Boolean).join(' · '),usageRefreshButton('claude',a,name),'claude-'+a.id)}</div>
+      <div class="account-bottom"><div class="account-dates"><div class="reset-block allowance-reset"><span>Allowance resets</span><strong class="countdown" data-reset="${w?.resets_at || ''}" title="${w?.resets_at?esc(dateTime(w.resets_at*1000)):''}">${countdown(w?.resets_at)}</strong></div>${renewalHtml(a,true)}${extraUsageHtml(a)}</div>${statePill(shownState,shownState!==state.text && shownState==='Unavailable' ? 'warn' : state.tone,[state.title || state.text,extra.note,note].filter(Boolean).join(' · '),usageRefreshButton('claude',a,name),'claude-'+a.id)}</div>
       ${usageRefreshNote('claude',a)}
       ${claudeRoutingRow(a)}</div></div>
     </article>`;
@@ -1631,12 +1651,15 @@ function signinStrip(a, gateway, outcome) {
     ${detail?`<span class="account-access-detail" role="status">${esc(detail)}</span>`:''}
   </div>`;
 }
+function routeLabel(enabled, pending=false) {
+  return `<span class="route-title">Routing</span><span class="route-value">${pending ? 'Saving…' : enabled==null ? 'Checking…' : enabled ? 'On' : 'Off'}</span>`;
+}
 function routingRow(a, gateway, lead='', note='') {
   const pending=routePending.has(a.id), required=signinNeeded(a);
   const enabled=!required && (a.routing_enabled ?? !a.disabled);
   const disabled=required || accessBlocked(gateway) || pending;
   const title=required?'Sign in to use for routing':current?.read_only?'Change routing from your computer dashboard':failed||gateway.online!==true?'Gateway unreachable':'';
-  return `<div class="account-route">${lead}<span class="route-toggle"><label for="route-${esc(a.id)}"><span class="route-use">Use for </span>routing</label><input id="route-${esc(a.id)}" data-route-account="${esc(a.id)}" data-access-focus="${esc(a.id+':route')}" type="checkbox" role="switch" aria-label="Use for routing" ${a.credit_spending?.paused?`aria-describedby="state-codex-${esc(a.id)}" `:''}${enabled?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''}></span></div>
+  return `<div class="account-route">${lead}<span class="route-toggle"><label for="route-${esc(a.id)}">${routeLabel(enabled,pending)}</label><input id="route-${esc(a.id)}" data-route-account="${esc(a.id)}" data-access-focus="${esc(a.id+':route')}" type="checkbox" role="switch" aria-label="Use for routing" ${a.credit_spending?.paused?`aria-describedby="state-codex-${esc(a.id)}" `:''}${enabled?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''}></span></div>
     ${note}${routeConfirm.has(a.id)?`<div class="route-confirm" role="alert"><span>No other Codex account is ready.</span><div><button type="button" class="reset-primary confirm" data-route-off="${esc(a.id)}" data-access-focus="${esc(a.id+':off')}">Turn off</button><button type="button" class="reset-cancel" data-route-keep="${esc(a.id)}" data-access-focus="${esc(a.id+':keep')}">Keep on</button></div></div>`:''}
     ${routeErrors.has(a.id)?`<div class="fast-usage error" role="status">${esc(routeErrors.get(a.id).message)}</div>`:''}`;
 }
@@ -1767,7 +1790,7 @@ accountEvents.addEventListener('pointerout',event=>{
 });
 
 // Codex speed (docs/fast-mode-policy.md): a stepped slider, Normal · Fast · Ultrafast, leads the routing row as the fast
-// mode switch did, so the card is no taller than the others. Its label is the current speed; one line under the row at
+// mode switch did, so the card is no taller than the others. Its heading names Speed and its label the saved choice; one line under the row at
 // most says what the slider can't (speedState). Ultrafast is a third stop while the account has ultrafast models, a
 // hollow one while the gateway can't apply it; with none (or the model list not read yet) the slider is a two-stop
 // switch, and a saved Ultrafast shows as Fast, which is what runs. The setting itself is kept. Choosing Ultrafast asks
@@ -1806,19 +1829,21 @@ function speedState(a, gateway) {
     : ultraOff ? SPEED_BLOCKED[reason] || 'Ultrafast is unavailable right now' : '';
   let status=null;
   if(error)status={tone:'error',html:`Couldn't save ${SPEED_NAMES[error.level]} · <button type="button" class="speed-retry" data-speed-retry="${esc(a.id)}">Try again</button>`};
-  else if(view.enforcement!=='active')status={tone:'warn',html:'Not enforced · gateway plugin not loaded'};
-  else if(level==='ultrafast' && !open)status={tone:'warn',html:reason==='plugin_outdated' ? 'Gateway plugin needs updating · running Fast' : 'Ultrafast unavailable · running Fast'};
+  else if(view.enforcement!=='active')status={tone:'warn',html:view.enforcement==='unavailable' ? 'Speed setting not applied' : 'Speed setting not verified',
+    detail:view.enforcement==='unavailable' ? 'Your speed choice is saved, but the router is not applying it to requests because its speed plugin is not loaded.' : 'The router has not confirmed whether your saved speed setting is being applied.'};
+  else if(level==='ultrafast' && !open)status={tone:'warn',html:'Ultrafast unavailable · running Fast',
+    detail:reason==='plugin_outdated' ? 'The router needs a speed plugin update to apply Ultrafast. Your saved choice is kept.' : ''};
   else if(tried?.until>Date.now())status={tone:'',html:esc(SPEED_BLOCKED[tried.reason] || 'Ultrafast is unavailable right now')};
   return {level,at:SPEEDS.indexOf(level),stops,ultraOff,disabled,title,status,busy:!!pending?.saving};
 }
 function speedRow(a, gateway) {
   const s=speedState(a,gateway), id=esc(a.id);
-  if(s.stops===1)return `<span class="account-speed normal-only" title="${esc(s.title)}"><span class="visually-hidden">Speed: </span>Normal<span class="visually-hidden">. ${esc(s.title)}</span></span>`;
-  return `<span class="account-speed${s.stops===2?' two':''}"><label class="speed-value" for="speed-${id}">${SPEEDS.slice(0,s.stops).map(level=>`<span${level===s.level?' class="on"':''}>${SPEED_NAMES[level]}</span>`).join('')}</label><input id="speed-${id}" data-speed-account="${id}" type="range" min="0" max="${s.stops-1}" step="1" value="${s.at}" data-at="${s.at}" aria-label="Speed" aria-valuetext="${SPEED_NAMES[s.level]}"${s.status?` aria-describedby="speed-${id}-status"`:''}${s.ultraOff?' class="ultra-off"':''}${s.busy?' aria-busy="true"':''}${s.disabled?' disabled':''}${s.title?` title="${esc(s.title)}"`:''}></span>`;
+  if(s.stops===1)return `<span class="account-speed normal-only" title="${esc(s.title)}"><span class="speed-heading">Speed</span><span class="speed-value">Normal<span class="visually-hidden">. ${esc(s.title)}</span></span></span>`;
+  return `<span class="account-speed${s.stops===2?' two':''}"><span class="speed-heading">Speed</span><label class="speed-value" for="speed-${id}">${SPEEDS.slice(0,s.stops).map(level=>`<span${level===s.level?' class="on"':''}>${SPEED_NAMES[level]}</span>`).join('')}</label><input id="speed-${id}" data-speed-account="${id}" type="range" min="0" max="${s.stops-1}" step="1" value="${s.at}" data-at="${s.at}" aria-label="Speed" aria-valuetext="${SPEED_NAMES[s.level]}"${s.status?` aria-describedby="speed-${id}-status"`:''}${s.ultraOff?' class="ultra-off"':''}${s.busy?' aria-busy="true"':''}${s.disabled?' disabled':''}${s.title?` title="${esc(s.title)}"`:''}></span>`;
 }
 function speedStatus(a, gateway) {
   const {status}=speedState(a,gateway);
-  return status ? `<div class="fast-usage${status.tone?' '+status.tone:''}" id="speed-${esc(a.id)}-status" data-speed-status="${esc(a.id)}">${status.html}</div>` : '';
+  return status ? `<div class="fast-usage${status.tone?' '+status.tone:''} speed-note" id="speed-${esc(a.id)}-status" data-speed-status="${esc(a.id)}" role="status"${status.detail?` title="${esc(status.detail)}"`:''}>${icon('alert')}<span class="speed-note-text">${status.html}</span>${status.detail?`<span class="visually-hidden">. ${esc(status.detail)}</span>`:''}</div>` : '';
 }
 function speedHold() {
   if(!speedPress && !speedKeys && !speedAsk)return false;
@@ -2276,8 +2301,8 @@ function healthItems(data) {
     detail:failed ? "This tab can't reach your desktop. It reconnects on its own." : gateway==='down' ? 'The desktop can’t reach the gateway.'
       : gateway==='stale' ? 'Account checks stopped updating. Quotas may be out of date.' : '',
     title:'Account checks by the gateway on your Linux desktop'},
-    {name:'Codex server',status:local(h.codex?.status || 'unknown'),
-      title:"The Codex server on your Linux desktop, for Phone Remote and Mac SSH. OpenAI's service status is separate."}];
+    {name:h.codex?.client==='t3' ? 'T3 Code server' : 'Codex server',status:local(h.codex?.status || 'unknown'),
+      title:h.codex?.client==='t3' ? 'The local T3 Code server process and listening port. Model requests are checked separately.' : "The Codex server on your Linux desktop, for Phone Remote and Mac SSH. OpenAI's service status is separate."}];
   const u=h.usage_collection;
   if(u && typeof u==='object')items.push({name:'Usage collection',status:local(u.status || 'unknown'),when:healthAgo(u.last_success_at),
     detail:u.status!=='healthy' && Array.isArray(u.issues) ? u.issues[0] || '' : '',title:`Records requests for the Usage tab. Last successful run: ${dateTime(u.last_success_at)}`});
@@ -2350,14 +2375,28 @@ function genericRoutingRow(p, a, gateway, attrs='') {
   const id=p.id+':'+a.key, input=`generic-route-${p.id}-${a.key}`, pending=genericRoutePending.has(id), required=a.availability?.state==='auth_required';
   const disabled=required || accessBlocked(gateway) || pending;
   const title=required?'Sign in to use for routing':current?.read_only?'Change routing from your computer dashboard':failed||gateway.online!==true?'Gateway unreachable':'';
-  return `<div class="account-route"><span class="route-toggle"><label for="${esc(input)}">Use for routing</label><input id="${esc(input)}" data-generic-route="${esc(id)}" ${attrs}type="checkbox" role="switch" ${a.routing_enabled && !required?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''}></span></div>
+  return `<div class="account-route"><span class="route-toggle"><label for="${esc(input)}">${routeLabel(a.routing_enabled && !required,pending)}</label><input id="${esc(input)}" data-generic-route="${esc(id)}" ${attrs}type="checkbox" role="switch" ${a.routing_enabled && !required?'checked':''} ${disabled?'disabled':''} ${pending?'aria-busy="true"':''} ${title?`title="${title}"`:''} aria-label="Use for routing"></span></div>
     ${genericRouteConfirm.has(id)?`<div class="route-confirm" role="alert"><span>No other ${esc(p.name)} account is ready.</span><div><button type="button" class="reset-primary confirm" id="${esc(input)}-off" data-generic-route-off="${esc(id)}">Turn off</button><button type="button" class="reset-cancel" id="${esc(input)}-keep" data-generic-route-keep="${esc(id)}">Keep on</button></div></div>`:''}
     ${genericRouteErrors.get(id)>Date.now()?'<div class="fast-usage error" role="status">Change not confirmed. Try again.</div>':''}`;
 }
 // Usage windows a provider reports through the gateway (Grok's billing credits). The first is the headline; a window
 // whose reset has passed reads "—" until the next read. Bare period labels ("Monthly") are credit windows.
+function quotaWindowsForCard(a) {
+  const windows=(Array.isArray(a.windows) ? a.windows : []).filter(w=>Number.isFinite(w?.used_pct ?? w?.used));
+  if(a.provider!=='antigravity')return windows;
+  // Google documents one shared Gemini quota. Collapse matching observations
+  // from that pool, retaining different values, reset times or measurements.
+  // https://antigravity.google/blog/changes-to-antigravity-plans/
+  const gemini=w=>w.kind==='model_quota' && typeof w.model==='string' && w.model.startsWith('gemini-');
+  const first=windows.find(gemini);
+  if(!first || !Number.isFinite(first.resets_at) || !Number.isFinite(Date.parse(first.measured_at)))return windows;
+  const shared=new Set(windows.filter(w=>gemini(w) && (w.used_pct ?? w.used)===(first.used_pct ?? first.used)
+    && w.resets_at===first.resets_at && w.measured_at===first.measured_at));
+  if(shared.size<2)return windows;
+  return windows.filter(w=>w===first || !shared.has(w)).map(w=>w===first ? {...w,label:'Gemini · shared quota'} : w);
+}
 function genericUsage(a, now=Date.now()) {
-  const windows=(Array.isArray(a.windows) ? a.windows : []).filter(w=>Number.isFinite(w?.used_pct ?? w?.used)).map(w=>{
+  const windows=quotaWindowsForCard(a).map(w=>{
     const used=Math.min(100,Math.max(0,w.used_pct ?? w.used)), due=Number.isFinite(w.resets_at) && w.resets_at*1000<=now;
     return {...w,used:due ? null : used,remaining:due ? null : 100-used};
   });
@@ -2372,6 +2411,13 @@ function endpointHost(value) {
   if(typeof value!=='string' || !value)return '';
   try { return new URL(value).host || value; } catch (_) { return value; }
 }
+function providerCreditsHtml(a) {
+  const s=a.subscription, credit=s?.ai_credits;
+  if(credit?.credit_type!=='GOOGLE_ONE_AI' || !Number.isFinite(credit.balance) || credit.balance<0)return '';
+  const age=Date.now()-Date.parse(s.checked_at), stale=!s.current || !Number.isFinite(age) || age<0 || age>900000;
+  const title='Google-reported AI credits'+(s.checked_at ? ' · As of '+dateTime(s.checked_at) : '');
+  return `<div class="reset-block" title="${esc(title)}"><span>AI credits${stale ? ' · last known' : ''}</span><strong>${esc(number(credit.balance))}</strong></div>`;
+}
 // Providers without allowance data: today's requests are the headline. With usage windows, "% remaining" leads instead.
 // API-key accounts use the same card; they never sign in, and show their endpoint instead. A provider that reports no
 // renewal date gets a Renews spot the user fills in (success today is in the section header), and no plan a badge they set.
@@ -2379,6 +2425,9 @@ function genericCard(p, a, gateway) {
   const t=a.today || {}, requests=t.requests ?? a.requests ?? 0, name=accountLabel(a), u=genericUsage(a), key=isKeyAccount(a);
   const rejected=a.availability?.state==='auth_required' && !a.disabled, signin=rejected && !key, reauth=signin && accountActions() && !!addProvider(p.id);
   const badge=a.plan || (key && !/\bapi key\b/i.test(name) ? 'API key' : ''), host=key ? endpointHost(a.base_url) : '';
+  const googlePlan=p.id==='antigravity' && !key && a.plan_source==='provider' && a.subscription?.plan===a.plan;
+  const profileAge=Date.now()-Date.parse(a.subscription?.checked_at);
+  const planTitle=googlePlan ? 'Reported by Google'+(!a.subscription.current || !Number.isFinite(profileAge) || profileAge<0 || profileAge>900000 ? ' · last known' : '')+(a.subscription.checked_at ? ' · As of '+dateTime(a.subscription.checked_at) : '') : a.plan && a.plan_source==='user' ? 'Set by you' : '';
   const renews=!key && (a.billing_editable?.renewal===true || !!a.billing?.renewal_date) ? renewalHtml(a,true) : '';
   const focus=part=>`data-access-focus="${esc(p.id+':'+a.key+':'+part)}"`;
   const until=a.availability?.retry_at && !failed && gateway.online && ['quota_exhausted','rate_limited','provider_unavailable'].includes(a.availability.state);
@@ -2391,19 +2440,19 @@ function genericCard(p, a, gateway) {
   const paced=!!u && !u.stale && !a.disabled && !rejected && !failed && gateway.online!==false, pacing=paced ? windowPace(u.w,remaining) : null;
   const f=u ? forecast(u.w,remaining,paced) : null;
   const hero=u ? `<div class="account-hero"><div class="quota-label">${esc(u.label)}${u.stale ? ' · last known' : ''}</div>
-      <div class="quota-value">${remaining==null ? '—' : esc(number(Math.round(remaining)))+'<span class="percent">%</span>'}<span class="remaining-word">remaining</span></div>
-      <div class="quota-track${pacing ? ' has-pace' : ''}" role="progressbar" aria-label="${esc(name)} ${esc(u.label)} remaining" aria-valuemin="0" aria-valuemax="100" ${remaining==null ? '' : `aria-valuenow="${Math.round(remaining)}"`}${paceValueText(pacing,remaining,f)}${heroTitle(f,pacing)}><span style="width:${remaining ?? 0}%"></span>${paceBar(pacing)}</div>
+      <div class="quota-value">${remaining==null ? '—' : esc(p.id==='antigravity' ? percent(remaining).replace('%','') : number(Math.round(remaining)))+'<span class="percent">%</span>'}<span class="remaining-word">remaining</span></div>
+      <div class="quota-track${pacing ? ' has-pace' : ''}" role="progressbar" aria-label="${esc(name)} ${esc(u.label)} remaining" aria-valuemin="0" aria-valuemax="100" ${remaining==null ? '' : `aria-valuenow="${p.id==='antigravity' ? remaining : Math.round(remaining)}"`}${paceValueText(pacing,remaining,f)}${heroTitle(f,pacing)}><span style="width:${remaining ?? 0}%"></span>${paceBar(pacing)}</div>
       <div class="quota-used"${heroTitle(f,pacing)}>${f?.long ? forecastHtml(f) : `<span class="requests-today">${esc(number(requests))} ${requests===1 ? 'request' : 'requests'} today</span>`}<span class="used-figure">${u.w.used==null ? 'Waiting for usage data' : esc(percent(u.w.used))+' used'}</span>${footReset(u.w)}</div></div>`
     : `<div class="account-hero"><div class="quota-label">Requests today</div>
       <div class="quota-value">${esc(number(requests))}<span class="remaining-word">${success==null ? '' : esc(success)+' success'}</span></div></div>`;
   const facts=u ? `<div class="reset-block allowance-reset"><span>${u.credits ? 'Credits reset' : 'Resets'}</span><strong class="countdown" data-reset="${u.w.resets_at || ''}" title="${u.w.resets_at ? esc(dateTime(u.w.resets_at*1000)) : ''}">${countdown(u.w.resets_at)}</strong></div>${renews || `<div class="reset-block"><span>Success today</span><strong>${esc(success ?? '—')}</strong></div>`}`
     : `<div class="reset-block"><span>Last request</span><strong>${esc(lastRequest(t.last_request_at))}</strong></div>${renews}${host ? `<div class="reset-block endpoint"><span>Endpoint</span><strong title="${esc(a.base_url)}">${esc(host)}</strong></div>` : ''}`;
   return `<article class="account-card generic-card ${providerAccent(p)}-card${a.disabled || rejected ? ' is-off' : ''}" data-provider="${esc(p.id)}" data-account-key="${esc(a.key)}"${key && a.auth_index ? ` data-auth-index="${esc(a.auth_index)}"` : ''}>
-      <div class="account-top"><div class="account-identity"><div class="account-name"><span title="${esc(name)}">${esc(shortName(name))}</span></div></div>${planBadge(badge,{title:a.plan && a.plan_source==='user' ? 'Set by you' : ''})}${cardMenuButton(p.id,a,name,focus('menu'))}</div>
+      <div class="account-top"><div class="account-identity"><div class="account-name"><span title="${esc(name)}">${esc(shortName(name))}</span></div></div>${planBadge(badge,{href:googlePlan ? 'https://one.google.com/' : '',title:planTitle})}${cardMenuButton(p.id,a,name,focus('menu'))}</div>
       <div class="account-body">${hero}
       <div class="account-side">${u?.others.length ? `<div class="limit-rows">${u.others.map(w=>limitRow(w.label || 'Usage window',w,false,paced,a.fresh_until)).join('')}</div>` : ''}
       ${signin ? `<div class="account-access critical"><div class="account-access-row"><span>${icon('alert')}Sign in required</span>${reauth ? `<button type="button" class="resets-button" id="${esc(`signin-${p.id}-${a.key}`)}" data-add-provider="${esc(p.id)}" data-add-key="${esc(a.key)}" aria-haspopup="dialog">Sign in</button>` : ''}</div></div>` : ''}
-      <div class="account-bottom"><div class="account-dates">${facts}</div>${signin ? '' : statePill(shown,tone,u ? state+' · '+u.freshness : state,usageRefreshButton(p.id,a,name),`${p.id}-${a.key}${key && a.auth_index ? '-'+a.auth_index : ''}`,focus('state'))}</div>
+      <div class="account-bottom"><div class="account-dates">${facts}${p.id==='antigravity' && !key ? providerCreditsHtml(a) : ''}</div>${signin ? '' : statePill(shown,tone,u ? state+' · '+u.freshness : state,usageRefreshButton(p.id,a,name),`${p.id}-${a.key}${key && a.auth_index ? '-'+a.auth_index : ''}`,focus('state'))}</div>
       ${signin ? '' : usageRefreshNote(p.id,a)}${genericRoutingRow(p,a,gateway,key ? focus('route')+' ' : '') || reservedRoute}</div></div>
     </article>`;
 }

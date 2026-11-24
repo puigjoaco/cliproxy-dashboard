@@ -927,13 +927,13 @@ class GatewayState:
         if len(matches) != 1:
             raise usage_adapters.RefreshError('unknown_account', 404)
         file = matches[0]
-        if provider not in ('codex', 'claude', 'xai'):
+        if provider not in ('codex', 'claude', 'xai', 'antigravity'):
             raise usage_adapters.RefreshError('unsupported', 400)
         watched = watch_accounts() if provider == 'claude' else []
         watch = usage_adapters.matched_claude_watch(file, [f for f in files if f.get('type') == 'claude'], watched)
         profile_updated = False
         billing_plan = None
-        if provider == 'claude':
+        if provider in ('claude', 'antigravity'):
             previous = self.profiles.view(file).get('checked_at')
             # The watch's Retry-After belongs to a different endpoint and token; the profile keeps its own.
             profile = self.profiles.fetch(file, call, self.usage_cache, manual=not after_reset, force=after_reset) or {}
@@ -950,7 +950,7 @@ class GatewayState:
                 account = self.usage_cache.fetch(file, call, manual=not after_reset, force=after_reset,
                                                 provider_retry_at=(watch or {}).get('provider_retry_at'))
             except usage_adapters.RefreshError as error:
-                if provider == 'claude' and error.status == 429:
+                if provider in ('claude', 'antigravity') and error.status == 429:
                     usage_at = self.usage_cache.available(file, (watch or {}).get('provider_retry_at'))['available_at']
                     profile_at = self.profiles.cache.available(file)['available_at']
                     error.retry_at = min(usage_at, profile_at) if usage_at and profile_at else None
@@ -1318,12 +1318,12 @@ class GatewayState:
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                 # Profile owns a separate endpoint budget and is read even if usage cools down.
                 list(pool.map(lambda f: self.profiles.fetch(f, api, self.usage_cache),
-                              [f for f in all_files if f.get('type') == 'claude']))
+                              [f for f in all_files if f.get('type') in ('claude', 'antigravity')]))
                 accounts = list(pool.map(lambda f: fetch_account(f, self.resets, cache=self.usage_cache, credit_spending=self.credit_spending), files))
                 # Share the gateway poll's workers; refresh/browser requests obey the same budget.
                 usage_accounts = list(pool.map(lambda f: self.usage_cache.fetch(
                                                    f, api, runtime_rows=claude_accounts, watched=watched),
-                                               [f for f in all_files if f.get('type') in ('claude', 'xai')]))
+                                               [f for f in all_files if f.get('type') in ('claude', 'xai', 'antigravity')]))
             for file in all_files:
                 if file.get('type') in ('claude', 'codex'):
                     watch = usage_adapters.matched_claude_watch(file, claude_accounts, watched) if file['type'] == 'claude' else None
@@ -1367,7 +1367,7 @@ class GatewayState:
                 # A completed manual read may have published while this poll
                 # was reading other credentials. Always bind the newest cache.
                 usage_accounts = [self.usage_cache.cached(f) or a for f, a in zip(
-                    [f for f in all_files if f.get('type') in ('claude', 'xai')], usage_accounts)]
+                    [f for f in all_files if f.get('type') in ('claude', 'xai', 'antigravity')], usage_accounts)]
                 usage_adapters.bind_claude_usage(claude_accounts, usage_accounts)
                 # Only positive evidence turns moves off; a failed read keeps the last answer.
                 available = (paths and move_tested(config) if config_error is None else
@@ -1445,6 +1445,9 @@ class GatewayState:
         result['routing_linked'] = routing_policy.routing_linked()
         result['codex_account_count'] = len(result['accounts'])
         records = billing_records()
+        result['provider_profiles'] = [dict(provider=file['type'], key=file['name'],
+            auth_index=file['auth_index'], **self.profiles.view(file))
+            for file in result.get('inventory', []) if file.get('type') == 'antigravity']
         for account in result.get('claude_accounts', []):
             file = dict(account, type='claude', name=account.get('key', account.get('name')))
             account['subscription'] = self.profiles.view(file)
@@ -1466,8 +1469,8 @@ class GatewayState:
                      if file.get('type') == 'claude' else None)
             result['usage_refresh'].setdefault(file.get('type'), {})[file.get('auth_index')] = self.usage_cache.available(
                 file, (watch or {}).get('provider_retry_at'))
-            if file.get('type') == 'claude':
-                info = result['usage_refresh']['claude'][file['auth_index']]
+            if file.get('type') in ('claude', 'antigravity'):
+                info = result['usage_refresh'][file['type']][file['auth_index']]
                 profile_at = self.profiles.cache.available(file)['available_at']
                 info['usage_available_at'] = info['available_at']
                 info['available_at'] = (min(info['available_at'], profile_at)
